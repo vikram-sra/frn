@@ -1,6 +1,8 @@
 import React, { createContext, useContext, useReducer, ReactNode } from 'react';
 
-// Types
+// ═══════════════════════════════════════════════════════════════
+// 📝 TYPES
+// ═══════════════════════════════════════════════════════════════
 export interface TableEntry {
     id: string;
     text: string;
@@ -15,66 +17,125 @@ export interface ChatMessage {
     timestamp: number;
 }
 
+export type AppPhase = 'category_select' | 'matching' | 'active' | 'summary' | 'board';
+
 export interface SessionState {
-    phase: 'category_select' | 'matching' | 'active' | 'summary';
+    phase: AppPhase;
     category: string;
     commonalities: TableEntry[];
     differences: TableEntry[];
     chatMessages: ChatMessage[];
     timerSeconds: number;
-    areDoorsOpen: boolean; // New state
+    areDoorsOpen: boolean;
+    botName: string;
+    matchColor: string;
 }
 
-// Actions
+// ═══════════════════════════════════════════════════════════════
+// 🎬 ACTIONS
+// ═══════════════════════════════════════════════════════════════
 type Action =
     | { type: 'SET_CATEGORY'; category: string }
     | { type: 'START_MATCH' }
-    | { type: 'START_SESSION' }
+    | { type: 'START_SESSION'; botName?: string; matchColor?: string }
     | { type: 'UPDATE_TIMER'; seconds: number }
     | { type: 'ADD_COMMONALITY'; entry: TableEntry }
     | { type: 'ADD_DIFFERENCE'; entry: TableEntry }
     | { type: 'ADD_CHAT_MESSAGE'; message: ChatMessage }
-    | { type: 'OPEN_DOORS' } // New action
+    | { type: 'OPEN_DOORS' }
+    | { type: 'GO_TO_BOARD' }
     | { type: 'RESET_SESSION' };
 
-// Initial State
+// ═══════════════════════════════════════════════════════════════
+// 🏁 INITIAL STATE
+// ═══════════════════════════════════════════════════════════════
 const initialState: SessionState = {
-    phase: 'category_select', // Start here now
+    phase: 'category_select',
     category: 'Modern Life',
-    timerSeconds: 300, // 5 minutes
+    timerSeconds: 90, // 1.5 minutes for engaging demo
     commonalities: [],
     differences: [],
     chatMessages: [],
-    areDoorsOpen: false, // New state
+    areDoorsOpen: false,
+    botName: 'Bot',
+    matchColor: '#A855F7',
 };
 
-// Reducer
+// ═══════════════════════════════════════════════════════════════
+// 🔄 REDUCER
+// ═══════════════════════════════════════════════════════════════
 function sessionReducer(state: SessionState, action: Action): SessionState {
     switch (action.type) {
         case 'SET_CATEGORY':
-            return { ...state, category: action.category, phase: 'matching' };
+            return {
+                ...state,
+                category: action.category,
+                phase: 'matching'
+            };
+
         case 'START_MATCH':
-            return { ...state, phase: 'matching' };
+            return {
+                ...state,
+                phase: 'matching'
+            };
+
         case 'START_SESSION':
-            return { ...initialState, category: state.category, phase: 'active' };
+            return {
+                ...initialState,
+                category: state.category,
+                phase: 'active',
+                botName: action.botName || 'Bot',
+                matchColor: action.matchColor || '#A855F7',
+            };
+
         case 'UPDATE_TIMER':
-            return { ...state, timerSeconds: action.seconds };
+            return {
+                ...state,
+                timerSeconds: action.seconds
+            };
+
         case 'ADD_COMMONALITY':
-            return { ...state, commonalities: [...state.commonalities, action.entry] };
+            return {
+                ...state,
+                commonalities: [...state.commonalities, action.entry]
+            };
+
         case 'ADD_DIFFERENCE':
-            return { ...state, differences: [...state.differences, action.entry] };
+            return {
+                ...state,
+                differences: [...state.differences, action.entry]
+            };
+
         case 'ADD_CHAT_MESSAGE':
-            return { ...state, chatMessages: [...state.chatMessages, action.message] };
+            return {
+                ...state,
+                chatMessages: [...state.chatMessages, action.message]
+            };
+
         case 'OPEN_DOORS':
-            return { ...state, areDoorsOpen: true };
+            return {
+                ...state,
+                areDoorsOpen: true,
+                phase: 'summary'
+            };
+
+        case 'GO_TO_BOARD':
+            return {
+                ...state,
+                phase: 'board'
+            };
+
         case 'RESET_SESSION':
             return initialState;
+
         default:
             return state;
     }
 }
 
-// Context
+// ═══════════════════════════════════════════════════════════════
+// 🌐 CONTEXT
+// ═══════════════════════════════════════════════════════════════
 interface SessionContextType {
     state: SessionState;
     dispatch: React.Dispatch<Action>;
@@ -82,7 +143,9 @@ interface SessionContextType {
 
 const SessionContext = createContext<SessionContextType | undefined>(undefined);
 
-// Provider
+// ═══════════════════════════════════════════════════════════════
+// 🎁 PROVIDER
+// ═══════════════════════════════════════════════════════════════
 export function SessionProvider({ children }: { children: ReactNode }) {
     const [state, dispatch] = useReducer(sessionReducer, initialState);
 
@@ -93,7 +156,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     );
 }
 
-// Hook
+// ═══════════════════════════════════════════════════════════════
+// 🪝 HOOK
+// ═══════════════════════════════════════════════════════════════
 export function useSession() {
     const context = useContext(SessionContext);
     if (context === undefined) {
@@ -102,7 +167,9 @@ export function useSession() {
     return context;
 }
 
-// Helper to generate unique IDs
+// ═══════════════════════════════════════════════════════════════
+// 🛠️ HELPERS
+// ═══════════════════════════════════════════════════════════════
 export function generateId(): string {
-    return Date.now().toString() + '-' + Math.random().toString(36).substr(2, 9);
+    return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 }

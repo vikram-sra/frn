@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useCallback, memo } from 'react';
 import {
     View,
     Text,
@@ -11,79 +11,332 @@ import {
     Animated,
     Dimensions,
 } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
+import * as Haptics from 'expo-haptics';
 import { useSession, generateId, TableEntry } from '../../context/SessionContext';
-import { analyzeSentiment } from '../../engines/SentimentEngine';
+import { analyzeSentiment, getSentimentColor, Sentiment } from '../../engines/SentimentEngine';
+import { redact } from '../../engines/RedactionEngine';
 import { botController } from '../../bots/BotController';
+import { saveSession, generateSessionId } from '../../utils/storage';
+import {
+    COLORS,
+    TYPOGRAPHY,
+    SPACING,
+    RADIUS,
+    getCategoryColor,
+    SHADOWS,
+    GLASS_CARD,
+    hexToRgba,
+} from '../../constants/theme';
 
-const { width } = Dimensions.get('window');
+const { width, height } = Dimensions.get('window');
 
 interface TableViewProps {
     matchColor: string;
 }
 
+// ═══════════════════════════════════════════════════════════════
+// 🌟 ANIMATED BACKGROUND PARTICLES
+// ═══════════════════════════════════════════════════════════════
+const BackgroundGlow = memo(() => {
+    const pulseAnim = useRef(new Animated.Value(0.3)).current;
+
+    useEffect(() => {
+        Animated.loop(
+            Animated.sequence([
+                Animated.timing(pulseAnim, { toValue: 0.6, duration: 3000, useNativeDriver: true }),
+                Animated.timing(pulseAnim, { toValue: 0.3, duration: 3000, useNativeDriver: true }),
+            ])
+        ).start();
+    }, []);
+
+    return (
+        <View style={StyleSheet.absoluteFill} pointerEvents="none">
+            <Animated.View style={[styles.glowOrb, styles.glowOrbGreen, { opacity: pulseAnim }]} />
+            <Animated.View style={[styles.glowOrb, styles.glowOrbRed, { opacity: pulseAnim }]} />
+        </View>
+    );
+});
+
+// ═══════════════════════════════════════════════════════════════
+// 🎴 ANIMATED ENTRY CARD WITH IMPROVED DESIGN
+// ═══════════════════════════════════════════════════════════════
+interface EntryCardProps {
+    entry: TableEntry;
+    isCommon: boolean;
+    botName: string;
+    index: number;
+}
+
+const EntryCard = memo(({ entry, isCommon, botName, index }: EntryCardProps) => {
+    const fadeAnim = useRef(new Animated.Value(0)).current;
+    const slideAnim = useRef(new Animated.Value(30)).current;
+    const scaleAnim = useRef(new Animated.Value(0.9)).current;
+
+    const displayText = entry.author === 'bot' ? redact(entry.text) : entry.text;
+    const accentColor = isCommon ? COLORS.success : COLORS.error;
+
+    useEffect(() => {
+        const delay = index * 50;
+        Animated.parallel([
+            Animated.spring(fadeAnim, { toValue: 1, tension: 80, friction: 10, delay, useNativeDriver: true }),
+            Animated.spring(slideAnim, { toValue: 0, tension: 80, friction: 10, delay, useNativeDriver: true }),
+            Animated.spring(scaleAnim, { toValue: 1, tension: 80, friction: 10, delay, useNativeDriver: true }),
+        ]).start();
+    }, []);
+
+    return (
+        <Animated.View
+            style={[
+                styles.entryContainer,
+                {
+                    opacity: fadeAnim,
+                    transform: [{ translateY: slideAnim }, { scale: scaleAnim }],
+                },
+            ]}
+        >
+            {/* Accent gradient bar */}
+            <LinearGradient
+                colors={isCommon ? [COLORS.success, COLORS.successDark] : [COLORS.error, COLORS.errorDark]}
+                style={styles.entryAccent}
+            />
+
+            <View style={styles.entryContent}>
+                <Text style={styles.entryText}>{displayText}</Text>
+                <View style={styles.entryMeta}>
+                    <View style={[
+                        styles.badge,
+                        { backgroundColor: entry.author === 'user' ? hexToRgba(accentColor, 0.2) : 'rgba(0,0,0,0.3)' }
+                    ]}>
+                        <View style={[styles.badgeDot, { backgroundColor: accentColor }]} />
+                        <Text style={[styles.badgeText, { color: entry.author === 'user' ? accentColor : COLORS.textSecondary }]}>
+                            {entry.author === 'user' ? 'YOU' : botName}
+                        </Text>
+                    </View>
+                </View>
+            </View>
+        </Animated.View>
+    );
+});
+
+// ═══════════════════════════════════════════════════════════════
+// ⌨️ TYPING INDICATOR
+// ═══════════════════════════════════════════════════════════════
+const TypingIndicator = memo(({ botName }: { botName: string }) => {
+    const dot1 = useRef(new Animated.Value(0.3)).current;
+    const dot2 = useRef(new Animated.Value(0.3)).current;
+    const dot3 = useRef(new Animated.Value(0.3)).current;
+
+    useEffect(() => {
+        const animateDot = (dot: Animated.Value, delay: number) => {
+            Animated.loop(
+                Animated.sequence([
+                    Animated.timing(dot, { toValue: 1, duration: 300, delay, useNativeDriver: true }),
+                    Animated.timing(dot, { toValue: 0.3, duration: 300, useNativeDriver: true }),
+                ])
+            ).start();
+        };
+        animateDot(dot1, 0);
+        animateDot(dot2, 150);
+        animateDot(dot3, 300);
+    }, []);
+
+    return (
+        <View style={styles.typingContainer}>
+            <Text style={styles.typingName}>{botName}</Text>
+            <View style={styles.typingDots}>
+                <Animated.View style={[styles.typingDot, { opacity: dot1 }]} />
+                <Animated.View style={[styles.typingDot, { opacity: dot2 }]} />
+                <Animated.View style={[styles.typingDot, { opacity: dot3 }]} />
+            </View>
+        </View>
+    );
+});
+
+// ═══════════════════════════════════════════════════════════════
+// 🎯 MAIN TABLE VIEW
+// ═══════════════════════════════════════════════════════════════
 export default function TableView({ matchColor }: TableViewProps) {
     const { state, dispatch } = useSession();
     const [inputText, setInputText] = useState('');
+    const [inputSentiment, setInputSentiment] = useState<Sentiment>('neutral');
+    const [lastUserInput, setLastUserInput] = useState<string>('');
+    const [isTyping, setIsTyping] = useState(false);
+    const [recentStatements, setRecentStatements] = useState<Set<string>>(new Set());
 
     // Animation Values
     const leftDoorAnim = useRef(new Animated.Value(0)).current;
     const rightDoorAnim = useRef(new Animated.Value(0)).current;
-    const fadeAnim = useRef(new Animated.Value(0)).current; // For the summary card
+    const fadeAnim = useRef(new Animated.Value(0)).current;
+    const pulseAnim = useRef(new Animated.Value(1)).current;
+    const glowAnim = useRef(new Animated.Value(0)).current;
+    const gutterGlowAnim = useRef(new Animated.Value(0.3)).current;
+    const timerPulseAnim = useRef(new Animated.Value(1)).current;
+    const timerGlowAnim = useRef(new Animated.Value(0)).current;
+    const inputBorderAnim = useRef(new Animated.Value(2)).current;
+    const sendButtonScale = useRef(new Animated.Value(1)).current;
 
     const scrollViewRefCommon = useRef<ScrollView>(null);
     const scrollViewRefDiff = useRef<ScrollView>(null);
 
-    // Set Bot Topic on Mount
-    useEffect(() => {
-        botController.setTopic(state.category);
-    }, [state.category]);
+    const categoryColor = getCategoryColor(state.category);
+    const currentBot = botController.getCurrentBot();
+    const sentimentColor = getSentimentColor(inputSentiment);
 
-    // Auto-scroll logic
+    // AI Pulse border animation
     useEffect(() => {
-        scrollViewRefCommon.current?.scrollToEnd({ animated: true });
+        if (inputText.length > 0) {
+            const sentiment = analyzeSentiment(inputText);
+            setInputSentiment(sentiment);
+
+            if (Platform.OS !== 'web') {
+                Haptics.selectionAsync();
+            }
+
+            Animated.parallel([
+                Animated.sequence([
+                    Animated.timing(pulseAnim, { toValue: 1.02, duration: 80, useNativeDriver: true }),
+                    Animated.timing(pulseAnim, { toValue: 1, duration: 80, useNativeDriver: true }),
+                ]),
+                Animated.sequence([
+                    Animated.timing(glowAnim, { toValue: 1, duration: 60, useNativeDriver: false }),
+                    Animated.timing(glowAnim, { toValue: 0.6, duration: 120, useNativeDriver: false }),
+                ]),
+                Animated.sequence([
+                    Animated.timing(gutterGlowAnim, { toValue: 1, duration: 80, useNativeDriver: false }),
+                    Animated.timing(gutterGlowAnim, { toValue: 0.5, duration: 150, useNativeDriver: false }),
+                ]),
+                Animated.sequence([
+                    Animated.timing(inputBorderAnim, { toValue: 3, duration: 80, useNativeDriver: false }),
+                    Animated.timing(inputBorderAnim, { toValue: 2, duration: 120, useNativeDriver: false }),
+                ]),
+            ]).start();
+        } else {
+            setInputSentiment('neutral');
+            Animated.timing(glowAnim, { toValue: 0, duration: 150, useNativeDriver: false }).start();
+            Animated.timing(gutterGlowAnim, { toValue: 0.3, duration: 150, useNativeDriver: false }).start();
+        }
+    }, [inputText]);
+
+    // Timer warning animation with DRAMATIC glow
+    useEffect(() => {
+        if (state.timerSeconds <= 15 && state.timerSeconds > 0 && state.phase === 'active') {
+            const intensity = state.timerSeconds <= 5 ? 1.15 : 1.08;
+            const speed = state.timerSeconds <= 5 ? 200 : 400;
+
+            Animated.loop(
+                Animated.sequence([
+                    Animated.parallel([
+                        Animated.timing(timerPulseAnim, { toValue: intensity, duration: speed, useNativeDriver: true }),
+                        Animated.timing(timerGlowAnim, { toValue: 1, duration: speed, useNativeDriver: false }),
+                    ]),
+                    Animated.parallel([
+                        Animated.timing(timerPulseAnim, { toValue: 1, duration: speed, useNativeDriver: true }),
+                        Animated.timing(timerGlowAnim, { toValue: 0.3, duration: speed, useNativeDriver: false }),
+                    ]),
+                ])
+            ).start();
+        }
+    }, [state.timerSeconds, state.phase]);
+
+    // Auto-scroll
+    useEffect(() => {
+        setTimeout(() => scrollViewRefCommon.current?.scrollToEnd({ animated: true }), 100);
     }, [state.commonalities]);
 
     useEffect(() => {
-        scrollViewRefDiff.current?.scrollToEnd({ animated: true });
+        setTimeout(() => scrollViewRefDiff.current?.scrollToEnd({ animated: true }), 100);
     }, [state.differences]);
+
+    // Function to trigger door open and verdict reveal
+    const triggerDoorOpen = useCallback(() => {
+        if (state.areDoorsOpen) return;
+
+        dispatch({ type: 'OPEN_DOORS' });
+
+        if (Platform.OS !== 'web') {
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        }
+
+        const sessionData = {
+            id: generateSessionId(),
+            category: state.category,
+            date: Date.now(),
+            commonalities: state.commonalities.map(c => c.text),
+            differences: state.differences.map(d => d.text),
+            userStand: getFinalStand().stand as 'agreement' | 'opposition' | 'neutral',
+        };
+        saveSession(sessionData);
+
+        // Epic door opening animation
+        Animated.sequence([
+            // Brief pause for dramatic effect
+            Animated.delay(100),
+            // Doors slide open with verdict fading in
+            Animated.parallel([
+                Animated.timing(leftDoorAnim, {
+                    toValue: -width / 2 - 50,
+                    duration: 1200,
+                    useNativeDriver: true,
+                }),
+                Animated.timing(rightDoorAnim, {
+                    toValue: width / 2 + 50,
+                    duration: 1200,
+                    useNativeDriver: true,
+                }),
+                Animated.timing(fadeAnim, {
+                    toValue: 1,
+                    duration: 1500,
+                    useNativeDriver: true,
+                }),
+            ]),
+        ]).start();
+    }, [state.areDoorsOpen, state.category, state.commonalities, state.differences]);
+
+    // Handle manual session end
+    const handleEndSession = useCallback(() => {
+        if (Platform.OS !== 'web') {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+        }
+        triggerDoorOpen();
+    }, [triggerDoorOpen]);
 
     // Timer & Door Logic
     useEffect(() => {
+        if (state.phase !== 'active') return;
+
         if (state.timerSeconds > 0) {
             const timer = setInterval(() => {
                 dispatch({ type: 'UPDATE_TIMER', seconds: state.timerSeconds - 1 });
             }, 1000);
             return () => clearInterval(timer);
         } else if (state.timerSeconds === 0 && !state.areDoorsOpen) {
-            // Timer ended, Open Doors!
-            dispatch({ type: 'OPEN_DOORS' });
-
-            Animated.parallel([
-                Animated.timing(leftDoorAnim, {
-                    toValue: -width / 2, // Slide left out of screen
-                    duration: 1500,
-                    useNativeDriver: true,
-                }),
-                Animated.timing(rightDoorAnim, {
-                    toValue: width / 2, // Slide right out of screen
-                    duration: 1500,
-                    useNativeDriver: true,
-                }),
-                Animated.timing(fadeAnim, {
-                    toValue: 1, // Fade in summary
-                    duration: 2000,
-                    useNativeDriver: true,
-                }),
-            ]).start();
+            triggerDoorOpen();
         }
-    }, [state.timerSeconds, state.areDoorsOpen, dispatch]);
+    }, [state.timerSeconds, state.areDoorsOpen, state.phase, triggerDoorOpen]);
 
-    // Autonomous Bot Dumping Loop (Stops when doors open)
+    // Bot Loop with typing indicator and duplicate prevention
     useEffect(() => {
-        if (state.areDoorsOpen) return;
+        if (state.areDoorsOpen || state.phase !== 'active') return;
+
+        const typingSpeed = botController.getTypingSpeed();
 
         const dumpInterval = setInterval(async () => {
-            const statement = await botController.getNextStatement();
+            // Show typing indicator
+            setIsTyping(true);
+
+            // Random delay for more natural feel
+            await new Promise(resolve => setTimeout(resolve, 500 + Math.random() * 800));
+
+            const statement = await botController.getNextStatement(state.category, lastUserInput);
+
+            // Prevent duplicate statements
+            if (recentStatements.has(statement.text)) {
+                setIsTyping(false);
+                return;
+            }
+
+            setRecentStatements(prev => new Set([...prev, statement.text]));
 
             const entry: TableEntry = {
                 id: generateId(),
@@ -92,18 +345,30 @@ export default function TableView({ matchColor }: TableViewProps) {
                 timestamp: Date.now(),
             };
 
+            setIsTyping(false);
+
             if (statement.column === 'commonalities') {
                 dispatch({ type: 'ADD_COMMONALITY', entry });
             } else {
                 dispatch({ type: 'ADD_DIFFERENCE', entry });
             }
-        }, 4000);
+        }, typingSpeed);
 
         return () => clearInterval(dumpInterval);
-    }, [dispatch, state.areDoorsOpen]);
+    }, [dispatch, state.areDoorsOpen, state.phase, state.category, lastUserInput, recentStatements]);
 
     const handleSend = () => {
         if (!inputText.trim()) return;
+
+        if (Platform.OS !== 'web') {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+        }
+
+        // Button animation
+        Animated.sequence([
+            Animated.timing(sendButtonScale, { toValue: 0.9, duration: 50, useNativeDriver: true }),
+            Animated.spring(sendButtonScale, { toValue: 1, tension: 200, friction: 10, useNativeDriver: true }),
+        ]).start();
 
         const sentiment = analyzeSentiment(inputText);
         const isCommon = sentiment === 'positive' || sentiment === 'neutral';
@@ -121,6 +386,7 @@ export default function TableView({ matchColor }: TableViewProps) {
             dispatch({ type: 'ADD_DIFFERENCE', entry });
         }
 
+        setLastUserInput(inputText);
         setInputText('');
     };
 
@@ -128,9 +394,30 @@ export default function TableView({ matchColor }: TableViewProps) {
         const userCommon = state.commonalities.filter(e => e.author === 'user').length;
         const userDiff = state.differences.filter(e => e.author === 'user').length;
 
-        if (userCommon > userDiff) return { text: "IN AGREEMENT", color: '#10B981', sub: "You found common ground." };
-        if (userDiff > userCommon) return { text: "IN OPPOSITION", color: '#EF4444', sub: "You stood your ground." };
-        return { text: "NEUTRAL", color: '#3B82F6', sub: "You see both sides." };
+        if (userCommon > userDiff) return {
+            text: "IN AGREEMENT",
+            stand: 'agreement',
+            color: COLORS.success,
+            gradient: ['#10B981', '#059669'] as [string, string],
+            sub: "You found common ground.",
+            emoji: "🤝"
+        };
+        if (userDiff > userCommon) return {
+            text: "IN OPPOSITION",
+            stand: 'opposition',
+            color: COLORS.error,
+            gradient: ['#EF4444', '#DC2626'] as [string, string],
+            sub: "You stood your ground.",
+            emoji: "⚔️"
+        };
+        return {
+            text: "NEUTRAL",
+            stand: 'neutral',
+            color: COLORS.info,
+            gradient: ['#3B82F6', '#2563EB'] as [string, string],
+            sub: "You see both sides.",
+            emoji: "⚖️"
+        };
     };
 
     const formatTime = (seconds: number) => {
@@ -139,192 +426,373 @@ export default function TableView({ matchColor }: TableViewProps) {
         return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
     };
 
+    const handleChallengeResponse = (wantsToTalk: boolean) => {
+        if (Platform.OS !== 'web') {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+        }
+        if (wantsToTalk) {
+            dispatch({ type: 'GO_TO_BOARD' });
+        } else {
+            dispatch({ type: 'RESET_SESSION' });
+        }
+    };
+
     const stand = getFinalStand();
 
     return (
-        <View style={styles.container}>
-            {/* BACKGROUND SUMMARY CARD (Reveal) */}
-            <Animated.View style={[styles.summaryOverlay, { opacity: fadeAnim }]}>
-                <Text style={[styles.standLabel, { color: stand.color }]}>{stand.text}</Text>
-                <Text style={styles.standSub}>{stand.sub}</Text>
+        <KeyboardAvoidingView
+            style={styles.container}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
+            {/* Background */}
+            <LinearGradient
+                colors={['#030712', '#0F172A', '#030712']}
+                style={StyleSheet.absoluteFill}
+            />
+            <BackgroundGlow />
 
-                <View style={styles.challengeBox}>
-                    <Text style={styles.challengeTitle}>Could you have a 5-minute conversation with this person?</Text>
-                    <View style={styles.challengeButtons}>
-                        <TouchableOpacity style={[styles.chalBtn, { backgroundColor: '#10B981' }]}>
-                            <Text style={styles.chalBtnText}>YES</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity style={[styles.chalBtn, { backgroundColor: '#EF4444' }]}>
-                            <Text style={styles.chalBtnText}>NO</Text>
-                        </TouchableOpacity>
+            {/* SUMMARY OVERLAY - Full screen verdict reveal */}
+            {state.areDoorsOpen && (
+                <Animated.View
+                    style={[
+                        styles.summaryOverlay,
+                        { opacity: fadeAnim }
+                    ]}
+                    pointerEvents="auto"
+                >
+                    <LinearGradient
+                        colors={['#030712', '#0F172A', '#1E1B4B', '#0F172A', '#030712']}
+                        locations={[0, 0.2, 0.5, 0.8, 1]}
+                        style={StyleSheet.absoluteFill}
+                    />
+
+                    <View style={styles.verdictContent}>
+                        <Animated.Text style={[styles.standEmoji, { transform: [{ scale: fadeAnim }] }]}>
+                            {stand.emoji}
+                        </Animated.Text>
+
+                        <LinearGradient
+                            colors={stand.gradient}
+                            start={{ x: 0, y: 0 }}
+                            end={{ x: 1, y: 0 }}
+                            style={styles.standLabelContainer}
+                        >
+                            <Text style={styles.standLabel}>{stand.text}</Text>
+                        </LinearGradient>
+
+                        <Text style={styles.standSub}>{stand.sub}</Text>
+
+                        <View style={styles.statsContainer}>
+                            <View style={styles.statBox}>
+                                <Text style={[styles.statNumber, { color: COLORS.success }]}>
+                                    {state.commonalities.length}
+                                </Text>
+                                <Text style={styles.statLabel}>COMMON</Text>
+                            </View>
+                            <View style={styles.statDivider} />
+                            <View style={styles.statBox}>
+                                <Text style={[styles.statNumber, { color: COLORS.error }]}>
+                                    {state.differences.length}
+                                </Text>
+                                <Text style={styles.statLabel}>DIFFERENT</Text>
+                            </View>
+                        </View>
+
+                        <View style={styles.challengeBox}>
+                            <Text style={styles.challengeTitle}>
+                                Could you have a 5-minute conversation with this person?
+                            </Text>
+                            <View style={styles.challengeButtons}>
+                                <TouchableOpacity
+                                    style={styles.chalBtnYes}
+                                    onPress={() => handleChallengeResponse(true)}
+                                >
+                                    <LinearGradient
+                                        colors={[COLORS.success, COLORS.successDark]}
+                                        style={styles.chalBtnGradient}
+                                    >
+                                        <Text style={styles.chalBtnText}>YES, SHOW ME MORE</Text>
+                                    </LinearGradient>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    style={styles.chalBtnNo}
+                                    onPress={() => handleChallengeResponse(false)}
+                                >
+                                    <Text style={styles.chalBtnTextNo}>NO, START OVER</Text>
+                                </TouchableOpacity>
+                            </View>
+                        </View>
                     </View>
-                </View>
-            </Animated.View>
-
+                </Animated.View>
+            )}
 
             {/* DOORS CONTAINER */}
             <View style={styles.doorsContainer} pointerEvents={state.areDoorsOpen ? 'none' : 'auto'}>
                 {/* Header */}
-                <Animated.View style={[styles.header, { transform: [{ translateY: state.areDoorsOpen ? -150 : 0 }] }]}>
-                    <Text style={styles.categoryLabel}>{state.category}</Text>
-                    <Text style={styles.timer}>{formatTime(state.timerSeconds)}</Text>
-                </Animated.View>
+                <View style={styles.header}>
+                    <LinearGradient
+                        colors={['rgba(30,41,59,0.95)', 'rgba(15,23,42,0.98)']}
+                        style={StyleSheet.absoluteFill}
+                    />
+                    <View style={styles.headerContent}>
+                        <View style={styles.headerLeft}>
+                            <View style={[styles.categoryDot, { backgroundColor: categoryColor.primary }]} />
+                            <Text style={styles.categoryLabel}>{state.category}</Text>
+                        </View>
+                        <View style={styles.headerRight}>
+                            <View style={styles.botPill}>
+                                <View style={styles.botPillDot} />
+                                <Text style={styles.botPillText}>{currentBot.name}</Text>
+                            </View>
+                            <Animated.View
+                                style={[
+                                    styles.timerContainer,
+                                    state.timerSeconds <= 15 && styles.timerWarning,
+                                    {
+                                        transform: [{ scale: timerPulseAnim }],
+                                        shadowColor: COLORS.error,
+                                        shadowOpacity: timerGlowAnim,
+                                        shadowRadius: 15,
+                                    },
+                                ]}
+                            >
+                                <Text style={[
+                                    styles.timer,
+                                    state.timerSeconds <= 15 && styles.timerTextWarning
+                                ]}>
+                                    {formatTime(state.timerSeconds)}
+                                </Text>
+                            </Animated.View>
+                            {/* End Session Button */}
+                            <TouchableOpacity
+                                onPress={handleEndSession}
+                                style={styles.endButton}
+                                activeOpacity={0.7}
+                            >
+                                <LinearGradient
+                                    colors={[hexToRgba(COLORS.warning, 0.9), hexToRgba(COLORS.warningDark, 0.9)]}
+                                    style={styles.endButtonGradient}
+                                >
+                                    <Text style={styles.endButtonText}>END</Text>
+                                </LinearGradient>
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                </View>
+
+                {/* Column Headers */}
+                <View style={styles.columnHeaders}>
+                    <TouchableOpacity style={[styles.columnHeader, styles.columnHeaderGreen]} activeOpacity={0.8}>
+                        <View style={styles.columnHeaderLeft}>
+                            <Text style={styles.columnHeaderIcon}>✓</Text>
+                            <Text style={[styles.columnHeaderText, { color: COLORS.success }]}>COMMON</Text>
+                        </View>
+                        <View style={[styles.countBadge, { backgroundColor: hexToRgba(COLORS.success, 0.2) }]}>
+                            <Text style={[styles.columnCount, { color: COLORS.success }]}>
+                                {state.commonalities.length}
+                            </Text>
+                        </View>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={[styles.columnHeader, styles.columnHeaderRed]} activeOpacity={0.8}>
+                        <View style={styles.columnHeaderLeft}>
+                            <Text style={styles.columnHeaderIcon}>✗</Text>
+                            <Text style={[styles.columnHeaderText, { color: COLORS.error }]}>FRICTION</Text>
+                        </View>
+                        <View style={[styles.countBadge, { backgroundColor: hexToRgba(COLORS.error, 0.2) }]}>
+                            <Text style={[styles.columnCount, { color: COLORS.error }]}>
+                                {state.differences.length}
+                            </Text>
+                        </View>
+                    </TouchableOpacity>
+                </View>
 
                 {/* Main Split Area */}
                 <View style={styles.mainArea}>
-                    {/* Green Column (Left Door) */}
-                    <Animated.View style={[styles.column, styles.columnGreen, { transform: [{ translateX: leftDoorAnim }] }]}>
-                        <ScrollView ref={scrollViewRefCommon} style={styles.columnList}>
-                            {state.commonalities.map((entry) => (
-                                <View key={entry.id} style={styles.entryContainer}>
-                                    <Text style={styles.entryText}>{entry.text}</Text>
-                                    <View style={[styles.badge, entry.author === 'user' ? styles.badgeUser : styles.badgeBot]}>
-                                        <Text style={styles.badgeText}>{entry.author === 'user' ? 'YOU' : 'BOT 1'}</Text>
-                                    </View>
+                    {/* Green Column */}
+                    <Animated.View style={[
+                        styles.column,
+                        styles.columnGreen,
+                        { transform: [{ translateX: leftDoorAnim }] }
+                    ]}>
+                        <ScrollView
+                            ref={scrollViewRefCommon}
+                            style={styles.columnList}
+                            showsVerticalScrollIndicator={false}
+                            contentContainerStyle={styles.columnContent}
+                        >
+                            {state.commonalities.length === 0 && (
+                                <View style={styles.emptyState}>
+                                    <Text style={styles.emptyEmoji}>🌱</Text>
+                                    <Text style={styles.emptyTitle}>Common Ground</Text>
+                                    <Text style={styles.emptyText}>Share agreements to plant seeds here</Text>
                                 </View>
+                            )}
+                            {state.commonalities.map((entry, index) => (
+                                <EntryCard
+                                    key={entry.id}
+                                    entry={entry}
+                                    isCommon={true}
+                                    botName={currentBot.name}
+                                    index={index}
+                                />
                             ))}
+                            <View style={{ height: 20 }} />
                         </ScrollView>
                     </Animated.View>
 
-                    {/* Red Column (Right Door) */}
-                    <Animated.View style={[styles.column, styles.columnRed, { transform: [{ translateX: rightDoorAnim }] }]}>
-                        <ScrollView ref={scrollViewRefDiff} style={styles.columnList}>
-                            {state.differences.map((entry) => (
-                                <View key={entry.id} style={styles.entryContainer}>
-                                    <Text style={styles.entryText}>{entry.text}</Text>
-                                    <View style={[styles.badge, entry.author === 'user' ? styles.badgeUser : styles.badgeBot]}>
-                                        <Text style={styles.badgeText}>{entry.author === 'user' ? 'YOU' : 'BOT 1'}</Text>
-                                    </View>
+                    {/* Center Gutter - fades out when doors open */}
+                    {!state.areDoorsOpen && (
+                        <Animated.View
+                            style={[
+                                styles.centerGutter,
+                                {
+                                    shadowColor: sentimentColor,
+                                    shadowOpacity: gutterGlowAnim,
+                                    shadowRadius: 25,
+                                }
+                            ]}
+                        >
+                            <Animated.View
+                                style={[
+                                    styles.gutterLine,
+                                    {
+                                        backgroundColor: inputText.length > 0 ? sentimentColor : categoryColor.primary,
+                                        opacity: gutterGlowAnim,
+                                    }
+                                ]}
+                            />
+                        </Animated.View>
+                    )}
+
+                    {/* Red Column */}
+                    <Animated.View style={[
+                        styles.column,
+                        styles.columnRed,
+                        { transform: [{ translateX: rightDoorAnim }] }
+                    ]}>
+                        <ScrollView
+                            ref={scrollViewRefDiff}
+                            style={styles.columnList}
+                            showsVerticalScrollIndicator={false}
+                            contentContainerStyle={styles.columnContent}
+                        >
+                            {state.differences.length === 0 && (
+                                <View style={styles.emptyState}>
+                                    <Text style={styles.emptyEmoji}>🔥</Text>
+                                    <Text style={styles.emptyTitle}>Friction Points</Text>
+                                    <Text style={styles.emptyText}>Express disagreements here</Text>
                                 </View>
+                            )}
+                            {state.differences.map((entry, index) => (
+                                <EntryCard
+                                    key={entry.id}
+                                    entry={entry}
+                                    isCommon={false}
+                                    botName={currentBot.name}
+                                    index={index}
+                                />
                             ))}
+                            {isTyping && <TypingIndicator botName={currentBot.name} />}
+                            <View style={{ height: 20 }} />
                         </ScrollView>
                     </Animated.View>
                 </View>
 
-                {/* Footer (slides down on open) */}
-                <Animated.View style={[styles.footer, { transform: [{ translateY: state.areDoorsOpen ? 150 : 0 }] }]}>
-                    <TextInput
-                        style={styles.input}
-                        value={inputText}
-                        onChangeText={setInputText}
-                        placeholder=""
+                {/* Footer Input */}
+                <View style={styles.footer}>
+                    <LinearGradient
+                        colors={['rgba(15,23,42,0.98)', 'rgba(30,41,59,1)']}
+                        style={StyleSheet.absoluteFill}
                     />
-                    <TouchableOpacity style={styles.sendButton} onPress={handleSend}>
-                        <Text style={styles.sendButtonText}>SEND</Text>
-                    </TouchableOpacity>
-                </Animated.View>
+                    <View style={styles.footerContent}>
+                        <Animated.View
+                            style={[
+                                styles.inputContainer,
+                                {
+                                    borderColor: sentimentColor,
+                                    borderWidth: inputBorderAnim,
+                                    transform: [{ scale: pulseAnim }],
+                                    shadowColor: sentimentColor,
+                                    shadowOpacity: glowAnim.interpolate({
+                                        inputRange: [0, 1],
+                                        outputRange: [0, 0.6],
+                                    }),
+                                    shadowRadius: glowAnim.interpolate({
+                                        inputRange: [0, 1],
+                                        outputRange: [0, 25],
+                                    }),
+                                }
+                            ]}
+                        >
+                            <Animated.View
+                                style={[
+                                    styles.sentimentDot,
+                                    {
+                                        backgroundColor: sentimentColor,
+                                        transform: [{ scale: pulseAnim }],
+                                        shadowColor: sentimentColor,
+                                        shadowOpacity: 0.8,
+                                        shadowRadius: 8,
+                                    }
+                                ]}
+                            />
+                            <TextInput
+                                style={styles.input}
+                                value={inputText}
+                                onChangeText={setInputText}
+                                placeholder="Share your perspective..."
+                                placeholderTextColor={COLORS.textMuted}
+                                onSubmitEditing={handleSend}
+                                returnKeyType="send"
+                            />
+                        </Animated.View>
+                        <Animated.View style={{ transform: [{ scale: sendButtonScale }] }}>
+                            <TouchableOpacity
+                                onPress={handleSend}
+                                activeOpacity={0.8}
+                            >
+                                <LinearGradient
+                                    colors={[sentimentColor, hexToRgba(sentimentColor, 0.8)]}
+                                    style={styles.sendButton}
+                                >
+                                    <Text style={styles.sendButtonText}>↑</Text>
+                                </LinearGradient>
+                            </TouchableOpacity>
+                        </Animated.View>
+                    </View>
+                </View>
             </View>
-        </View>
+        </KeyboardAvoidingView>
     );
 }
 
+// ═══════════════════════════════════════════════════════════════
+// 🎨 STYLES
+// ═══════════════════════════════════════════════════════════════
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: '#1E1E1E', // Dark background for the gap
-        position: 'relative',
+        backgroundColor: COLORS.bgPrimary,
     },
-    header: {
-        backgroundColor: '#E5E5E5', // Light gray from image
-        paddingHorizontal: 20,
-        paddingVertical: 16,
-        height: 100,
-        justifyContent: 'space-between',
-        zIndex: 10,
+    glowOrb: {
+        position: 'absolute',
+        borderRadius: 999,
     },
-    categoryLabel: {
-        fontSize: 16,
-        fontWeight: '600',
-        color: '#4C1D95', // Deep purple
-        textTransform: 'uppercase',
+    glowOrbGreen: {
+        width: 200,
+        height: 200,
+        backgroundColor: COLORS.success,
+        left: -50,
+        top: '30%',
+        opacity: 0.1,
     },
-    timer: {
-        fontSize: 24,
-        fontWeight: '700',
-        color: '#4C1D95',
-    },
-    statusLabel: { // Keeping for legacy reference in logic but not used in new design
-        fontSize: 18,
-        fontWeight: '500',
-        color: '#4C1D95',
-    },
-    mainArea: {
-        flex: 1,
-        flexDirection: 'row',
-        padding: 0, // No padding for full doors
-        gap: 0, // No gap for full doors
-        backgroundColor: '#1E1E1E',
-    },
-    column: {
-        flex: 1,
-        overflow: 'hidden',
-    },
-    columnGreen: {
-        backgroundColor: '#558B5E', // Muted green from image
-    },
-    columnRed: {
-        backgroundColor: '#C24B4B', // Muted red from image
-    },
-    columnList: {
-        padding: 10,
-    },
-    entryContainer: {
-        marginBottom: 16,
-    },
-    entryText: {
-        color: '#fff',
-        fontSize: 18, // Big readable text
-        fontWeight: '600',
-        marginBottom: 6,
-        lineHeight: 24,
-    },
-    badge: {
-        paddingHorizontal: 8,
-        paddingVertical: 4,
-        borderRadius: 4,
-        alignSelf: 'flex-start',
-    },
-    badgeUser: {
-        backgroundColor: 'rgba(0,0,0,0.3)',
-    },
-    badgeBot: {
-        backgroundColor: 'rgba(255,255,255,0.2)',
-    },
-    badgeText: {
-        color: '#fff',
-        fontSize: 10,
-        fontWeight: 'bold',
-    },
-    footer: {
-        backgroundColor: '#1E1E1E',
-        padding: 16,
-        flexDirection: 'row',
-        alignItems: 'center',
-        height: 100,
-        zIndex: 10,
-    },
-    input: {
-        flex: 1,
-        backgroundColor: '#D4D4D4',
-        height: '100%',
-        borderRadius: 4,
-        paddingHorizontal: 16,
-        fontSize: 18,
-        color: '#000',
-        marginRight: 16,
-    },
-    sendButton: {
-        backgroundColor: '#262626', // Dark button
-        height: '100%',
-        aspectRatio: 1.5,
-        borderRadius: 8,
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    sendButtonText: {
-        color: '#fff',
-        fontSize: 18,
-        fontWeight: 'bold',
+    glowOrbRed: {
+        width: 200,
+        height: 200,
+        backgroundColor: COLORS.error,
+        right: -50,
+        top: '40%',
+        opacity: 0.1,
     },
     doorsContainer: {
         flex: 1,
@@ -333,57 +801,418 @@ const styles = StyleSheet.create({
         left: 0,
         right: 0,
         bottom: 0,
-        zIndex: 1, // Ensure doors are above summary but below header/footer when open
+        zIndex: 1,
+    },
+    header: {
+        paddingTop: 50,
+        borderBottomWidth: 1,
+        borderBottomColor: COLORS.glassBorder,
+        overflow: 'hidden',
+    },
+    headerContent: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        paddingHorizontal: SPACING.lg,
+        paddingVertical: SPACING.md,
+    },
+    headerLeft: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: SPACING.sm,
+    },
+    categoryDot: {
+        width: 10,
+        height: 10,
+        borderRadius: 5,
+    },
+    categoryLabel: {
+        fontSize: TYPOGRAPHY.sizeMd,
+        fontWeight: TYPOGRAPHY.weightBold,
+        color: COLORS.textPrimary,
+    },
+    headerRight: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: SPACING.md,
+    },
+    botPill: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: hexToRgba(COLORS.accentPurple, 0.15),
+        paddingHorizontal: SPACING.md,
+        paddingVertical: SPACING.xs,
+        borderRadius: RADIUS.full,
+        borderWidth: 1,
+        borderColor: hexToRgba(COLORS.accentPurple, 0.3),
+        gap: SPACING.xs,
+    },
+    botPillDot: {
+        width: 6,
+        height: 6,
+        borderRadius: 3,
+        backgroundColor: COLORS.accentPurple,
+    },
+    botPillText: {
+        fontSize: TYPOGRAPHY.sizeSm,
+        fontWeight: TYPOGRAPHY.weightSemibold,
+        color: COLORS.accentPurple,
+    },
+    timerContainer: {
+        backgroundColor: COLORS.bgPrimary,
+        paddingHorizontal: SPACING.lg,
+        paddingVertical: SPACING.sm,
+        borderRadius: RADIUS.lg,
+        borderWidth: 1,
+        borderColor: COLORS.glassBorder,
+        shadowOffset: { width: 0, height: 0 },
+    },
+    timerWarning: {
+        backgroundColor: hexToRgba(COLORS.error, 0.15),
+        borderColor: COLORS.error,
+    },
+    timer: {
+        fontSize: TYPOGRAPHY.sizeLg,
+        fontWeight: TYPOGRAPHY.weightBold,
+        color: COLORS.textPrimary,
+        fontVariant: ['tabular-nums'],
+    },
+    timerTextWarning: {
+        color: COLORS.error,
+    },
+    endButton: {
+        borderRadius: RADIUS.lg,
+        overflow: 'hidden',
+    },
+    endButtonGradient: {
+        paddingHorizontal: SPACING.md,
+        paddingVertical: SPACING.sm,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    endButtonText: {
+        fontSize: TYPOGRAPHY.sizeSm,
+        fontWeight: TYPOGRAPHY.weightBold,
+        color: COLORS.textPrimary,
+        letterSpacing: TYPOGRAPHY.trackingWide,
+    },
+    columnHeaders: {
+        flexDirection: 'row',
+    },
+    columnHeader: {
+        flex: 1,
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        paddingHorizontal: SPACING.lg,
+        paddingVertical: SPACING.md,
+    },
+    columnHeaderLeft: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: SPACING.sm,
+    },
+    columnHeaderIcon: {
+        fontSize: TYPOGRAPHY.sizeMd,
+        fontWeight: TYPOGRAPHY.weightBold,
+        color: COLORS.textPrimary,
+    },
+    columnHeaderGreen: {
+        backgroundColor: hexToRgba(COLORS.success, 0.08),
+        borderBottomWidth: 2,
+        borderBottomColor: COLORS.success,
+    },
+    columnHeaderRed: {
+        backgroundColor: hexToRgba(COLORS.error, 0.08),
+        borderBottomWidth: 2,
+        borderBottomColor: COLORS.error,
+    },
+    columnHeaderText: {
+        fontSize: TYPOGRAPHY.sizeSm,
+        fontWeight: TYPOGRAPHY.weightBold,
+        letterSpacing: TYPOGRAPHY.trackingWider,
+    },
+    countBadge: {
+        paddingHorizontal: SPACING.md,
+        paddingVertical: SPACING.xs,
+        borderRadius: RADIUS.full,
+    },
+    columnCount: {
+        fontSize: TYPOGRAPHY.sizeMd,
+        fontWeight: TYPOGRAPHY.weightBold,
+    },
+    mainArea: {
+        flex: 1,
+        flexDirection: 'row',
+    },
+    column: {
+        flex: 1,
+        overflow: 'hidden',
+    },
+    columnGreen: {
+        backgroundColor: hexToRgba(COLORS.success, 0.04),
+    },
+    columnRed: {
+        backgroundColor: hexToRgba(COLORS.error, 0.04),
+    },
+    centerGutter: {
+        width: 6,
+        backgroundColor: COLORS.bgPrimary,
+        alignItems: 'center',
+        justifyContent: 'center',
+        shadowOffset: { width: 0, height: 0 },
+    },
+    gutterLine: {
+        width: 2,
+        height: '100%',
+    },
+    columnList: {
+        flex: 1,
+    },
+    columnContent: {
+        padding: SPACING.md,
+    },
+    emptyState: {
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: SPACING['4xl'],
+        opacity: 0.7,
+    },
+    emptyEmoji: {
+        fontSize: 48,
+        marginBottom: SPACING.md,
+    },
+    emptyTitle: {
+        fontSize: TYPOGRAPHY.sizeMd,
+        fontWeight: TYPOGRAPHY.weightBold,
+        color: COLORS.textSecondary,
+        marginBottom: SPACING.xs,
+    },
+    emptyText: {
+        fontSize: TYPOGRAPHY.sizeSm,
+        color: COLORS.textMuted,
+        textAlign: 'center',
+    },
+    entryContainer: {
+        marginBottom: SPACING.md,
+        borderRadius: RADIUS.lg,
+        backgroundColor: 'rgba(0,0,0,0.25)',
+        overflow: 'hidden',
+    },
+    entryAccent: {
+        position: 'absolute',
+        left: 0,
+        top: 0,
+        bottom: 0,
+        width: 4,
+    },
+    entryContent: {
+        padding: SPACING.md,
+        paddingLeft: SPACING.lg,
+    },
+    entryText: {
+        color: COLORS.textPrimary,
+        fontSize: TYPOGRAPHY.sizeMd,
+        fontWeight: TYPOGRAPHY.weightMedium,
+        marginBottom: SPACING.sm,
+        lineHeight: TYPOGRAPHY.sizeMd * 1.5,
+    },
+    entryMeta: {
+        flexDirection: 'row',
+        alignItems: 'center',
+    },
+    badge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: SPACING.sm,
+        paddingVertical: SPACING.xs,
+        borderRadius: RADIUS.sm,
+        gap: SPACING.xs,
+    },
+    badgeDot: {
+        width: 5,
+        height: 5,
+        borderRadius: 3,
+    },
+    badgeText: {
+        fontSize: TYPOGRAPHY.sizeXs,
+        fontWeight: TYPOGRAPHY.weightBold,
+        letterSpacing: TYPOGRAPHY.trackingWide,
+    },
+    typingContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        padding: SPACING.md,
+        opacity: 0.6,
+        gap: SPACING.sm,
+    },
+    typingName: {
+        fontSize: TYPOGRAPHY.sizeSm,
+        color: COLORS.textMuted,
+        fontStyle: 'italic',
+    },
+    typingDots: {
+        flexDirection: 'row',
+        gap: 4,
+    },
+    typingDot: {
+        width: 6,
+        height: 6,
+        borderRadius: 3,
+        backgroundColor: COLORS.textMuted,
+    },
+    footer: {
+        borderTopWidth: 1,
+        borderTopColor: COLORS.glassBorder,
+        overflow: 'hidden',
+    },
+    footerContent: {
+        padding: SPACING.lg,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: SPACING.md,
+    },
+    inputContainer: {
+        flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: COLORS.bgPrimary,
+        borderRadius: RADIUS['2xl'],
+        paddingHorizontal: SPACING.lg,
+        height: 56,
+        shadowOffset: { width: 0, height: 0 },
+    },
+    sentimentDot: {
+        width: 12,
+        height: 12,
+        borderRadius: 6,
+        marginRight: SPACING.md,
+        shadowOffset: { width: 0, height: 0 },
+    },
+    input: {
+        flex: 1,
+        fontSize: TYPOGRAPHY.sizeMd,
+        color: COLORS.textPrimary,
+        height: '100%',
+    },
+    sendButton: {
+        width: 56,
+        height: 56,
+        borderRadius: RADIUS['2xl'],
+        justifyContent: 'center',
+        alignItems: 'center',
+        ...SHADOWS.md,
+    },
+    sendButtonText: {
+        color: COLORS.textPrimary,
+        fontSize: TYPOGRAPHY.size2xl,
+        fontWeight: TYPOGRAPHY.weightBold,
     },
     summaryOverlay: {
         ...StyleSheet.absoluteFillObject,
-        backgroundColor: '#1E1E1E',
+        zIndex: 1000,
+    },
+    verdictContent: {
+        flex: 1,
         justifyContent: 'center',
         alignItems: 'center',
-        zIndex: 0, // Behind the doors initially
-        padding: 20,
+        padding: SPACING.xl,
+    },
+    standEmoji: {
+        fontSize: 80,
+        marginBottom: SPACING.xl,
+    },
+    standLabelContainer: {
+        paddingHorizontal: SPACING['3xl'],
+        paddingVertical: SPACING.lg,
+        borderRadius: RADIUS['2xl'],
+        marginBottom: SPACING.md,
     },
     standLabel: {
-        fontSize: 48,
-        fontWeight: '900',
-        marginBottom: 10,
+        fontSize: TYPOGRAPHY.size3xl,
+        fontWeight: TYPOGRAPHY.weightBlack,
+        color: COLORS.textPrimary,
         textAlign: 'center',
-        // textShadowColor: 'rgba(0, 0, 0, 0.75)',
-        // textShadowOffset: { width: -1, height: 1 },
-        // textShadowRadius: 10,
+        letterSpacing: TYPOGRAPHY.trackingWider,
     },
     standSub: {
-        fontSize: 20,
-        color: '#D4D4D4',
-        marginBottom: 40,
-        fontWeight: '500',
+        fontSize: TYPOGRAPHY.sizeLg,
+        color: COLORS.textSecondary,
+        marginBottom: SPACING['3xl'],
+        fontWeight: TYPOGRAPHY.weightMedium,
+    },
+    statsContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginBottom: SPACING['3xl'],
+        gap: SPACING['3xl'],
+    },
+    statBox: {
+        alignItems: 'center',
+    },
+    statNumber: {
+        fontSize: TYPOGRAPHY.size5xl,
+        fontWeight: TYPOGRAPHY.weightBlack,
+    },
+    statLabel: {
+        fontSize: TYPOGRAPHY.sizeXs,
+        fontWeight: TYPOGRAPHY.weightBold,
+        color: COLORS.textMuted,
+        letterSpacing: TYPOGRAPHY.trackingWidest,
+        marginTop: SPACING.xs,
+    },
+    statDivider: {
+        width: 1,
+        height: 60,
+        backgroundColor: COLORS.glassBorder,
     },
     challengeBox: {
-        backgroundColor: '#262626',
-        borderRadius: 12,
-        padding: 20,
-        width: '90%',
+        ...GLASS_CARD,
+        padding: SPACING['2xl'],
+        width: '100%',
+        maxWidth: 400,
         alignItems: 'center',
     },
     challengeTitle: {
-        color: '#fff',
-        fontSize: 18,
-        fontWeight: '600',
+        color: COLORS.textPrimary,
+        fontSize: TYPOGRAPHY.sizeLg,
+        fontWeight: TYPOGRAPHY.weightSemibold,
         textAlign: 'center',
-        marginBottom: 20,
+        marginBottom: SPACING['2xl'],
+        lineHeight: TYPOGRAPHY.sizeLg * 1.5,
     },
     challengeButtons: {
-        flexDirection: 'row',
-        gap: 20,
+        width: '100%',
+        gap: SPACING.md,
     },
-    chalBtn: {
-        paddingVertical: 12,
-        paddingHorizontal: 30,
-        borderRadius: 8,
+    chalBtnYes: {
+        borderRadius: RADIUS['2xl'],
+        overflow: 'hidden',
+    },
+    chalBtnGradient: {
+        paddingVertical: SPACING.lg,
+        paddingHorizontal: SPACING['2xl'],
+        alignItems: 'center',
+    },
+    chalBtnNo: {
+        paddingVertical: SPACING.lg,
+        paddingHorizontal: SPACING['2xl'],
+        borderRadius: RADIUS['2xl'],
+        alignItems: 'center',
+        backgroundColor: COLORS.glassBg,
+        borderWidth: 1,
+        borderColor: COLORS.glassBorder,
     },
     chalBtnText: {
-        color: '#fff',
-        fontSize: 18,
-        fontWeight: 'bold',
+        color: COLORS.textPrimary,
+        fontSize: TYPOGRAPHY.sizeMd,
+        fontWeight: TYPOGRAPHY.weightBold,
+        letterSpacing: TYPOGRAPHY.trackingWide,
+    },
+    chalBtnTextNo: {
+        color: COLORS.textSecondary,
+        fontSize: TYPOGRAPHY.sizeMd,
+        fontWeight: TYPOGRAPHY.weightBold,
+        letterSpacing: TYPOGRAPHY.trackingWide,
     },
 });
