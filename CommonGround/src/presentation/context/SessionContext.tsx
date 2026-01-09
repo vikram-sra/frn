@@ -17,10 +17,18 @@ export interface ChatMessage {
     timestamp: number;
 }
 
-export type AppPhase = 'category_select' | 'matching' | 'active' | 'summary' | 'board';
+export interface UserIdentity {
+    id: string;
+    name: string;
+    avatarEmoji: string;
+    trait: string;
+}
+
+export type AppPhase = 'identity_reveal' | 'category_select' | 'matching' | 'active' | 'summary' | 'board';
 
 export interface SessionState {
     phase: AppPhase;
+    userIdentity: UserIdentity | null;
     category: string;
     commonalities: TableEntry[];
     differences: TableEntry[];
@@ -35,6 +43,8 @@ export interface SessionState {
 // 🎬 ACTIONS
 // ═══════════════════════════════════════════════════════════════
 type Action =
+    | { type: 'SET_IDENTITY'; identity: UserIdentity }
+    | { type: 'CONFIRM_IDENTITY' }
     | { type: 'SET_CATEGORY'; category: string }
     | { type: 'START_MATCH' }
     | { type: 'START_SESSION'; botName?: string; matchColor?: string }
@@ -50,7 +60,8 @@ type Action =
 // 🏁 INITIAL STATE
 // ═══════════════════════════════════════════════════════════════
 const initialState: SessionState = {
-    phase: 'category_select',
+    phase: 'identity_reveal',
+    userIdentity: null,
     category: 'Modern Life',
     timerSeconds: 90, // 1.5 minutes for engaging demo
     commonalities: [],
@@ -66,11 +77,22 @@ const initialState: SessionState = {
 // ═══════════════════════════════════════════════════════════════
 function sessionReducer(state: SessionState, action: Action): SessionState {
     switch (action.type) {
+        case 'SET_IDENTITY':
+            return {
+                ...state,
+                userIdentity: action.identity
+            };
+
+        case 'CONFIRM_IDENTITY':
+            return {
+                ...state,
+                phase: 'category_select'
+            };
+
         case 'SET_CATEGORY':
             return {
                 ...state,
-                category: action.category,
-                phase: 'matching'
+                category: action.category
             };
 
         case 'START_MATCH':
@@ -82,6 +104,7 @@ function sessionReducer(state: SessionState, action: Action): SessionState {
         case 'START_SESSION':
             return {
                 ...initialState,
+                userIdentity: state.userIdentity, // Preserve identity
                 category: state.category,
                 phase: 'active',
                 botName: action.botName || 'Bot',

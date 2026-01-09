@@ -2,13 +2,14 @@ import { StatusBar } from 'expo-status-bar';
 import React, { useState, useEffect, useRef } from 'react';
 import { View, StyleSheet, Animated } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { SessionProvider, useSession } from './src/context/SessionContext';
-import MatchScreen from './src/screens/MatchScreen';
-import TableView from './src/components/TableView/TableView';
-import CategorySelectionScreen from './src/screens/CategorySelectionScreen';
-import BoardScreen from './src/screens/BoardScreen';
-import { botController } from './src/bots/BotController';
-import { COLORS } from './src/constants/theme';
+import { SessionProvider, useSession } from './src/presentation/context/SessionContext';
+import MatchScreen from './src/presentation/screens/MatchScreen';
+import TableView from './src/presentation/components/TableView/TableView';
+import CategorySelectionScreen from './src/presentation/screens/CategorySelectionScreen';
+import IdentityRevealScreen from './src/presentation/screens/IdentityRevealScreen';
+import BoardScreen from './src/presentation/screens/BoardScreen';
+import { botController } from './src/data/services/BotService';
+import { COLORS } from './src/presentation/theme';
 
 // ═══════════════════════════════════════════════════════════════
 // 🌟 MAIN APP CONTENT
@@ -17,73 +18,75 @@ function AppContent() {
   const { state, dispatch } = useSession();
   const [matchColor, setMatchColor] = useState<string>('#A855F7');
   const fadeAnim = useRef(new Animated.Value(1)).current;
+  const slideAnim = useRef(new Animated.Value(0)).current;
+  const prevPhase = useRef(state.phase);
 
-  // Smooth transition between screens
-  const transitionToScreen = (callback: () => void) => {
-    Animated.sequence([
-      Animated.timing(fadeAnim, {
-        toValue: 0,
-        duration: 200,
-        useNativeDriver: true,
-      }),
-      Animated.timing(fadeAnim, {
-        toValue: 1,
-        duration: 300,
-        useNativeDriver: true,
-      }),
-    ]).start();
+  // Automatic transition when phase changes
+  useEffect(() => {
+    if (prevPhase.current !== state.phase) {
+      // Direct jump? No, let's animate
+      fadeAnim.setValue(0);
+      slideAnim.setValue(30);
 
-    setTimeout(callback, 200);
-  };
+      Animated.parallel([
+        Animated.timing(fadeAnim, {
+          toValue: 1,
+          duration: 400,
+          useNativeDriver: true,
+        }),
+        Animated.spring(slideAnim, {
+          toValue: 0,
+          tension: 50,
+          friction: 8,
+          useNativeDriver: true,
+        }),
+      ]).start();
+
+      prevPhase.current = state.phase;
+    }
+  }, [state.phase]);
 
   const handleMatchComplete = (color: string) => {
     setMatchColor(color);
     botController.resetBot();
-
-    transitionToScreen(() => {
-      dispatch({
-        type: 'START_SESSION',
-        botName: botController.getCurrentBot().name,
-        matchColor: color
-      });
+    dispatch({
+      type: 'START_SESSION',
+      botName: botController.getCurrentBot().name,
+      matchColor: color
     });
   };
 
-  // Category Selection Phase
-  if (state.phase === 'category_select') {
-    return (
-      <Animated.View style={[styles.screenContainer, { opacity: fadeAnim }]}>
-        <CategorySelectionScreen />
-      </Animated.View>
-    );
-  }
+  const renderScreen = () => {
+    switch (state.phase) {
+      case 'identity_reveal':
+        return <IdentityRevealScreen />;
+      case 'category_select':
+        return <CategorySelectionScreen />;
+      case 'matching':
+        return (
+          <MatchScreen
+            onMatchComplete={handleMatchComplete}
+            initialCategory={state.category}
+          />
+        );
+      case 'board':
+        return <BoardScreen onClose={() => dispatch({ type: 'RESET_SESSION' })} />;
+      case 'active':
+      default:
+        return <TableView matchColor={matchColor} />;
+    }
+  };
 
-  // Matching Phase
-  if (state.phase === 'matching') {
-    return (
-      <Animated.View style={[styles.screenContainer, { opacity: fadeAnim }]}>
-        <MatchScreen
-          onMatchComplete={handleMatchComplete}
-          initialCategory={state.category}
-        />
-      </Animated.View>
-    );
-  }
-
-  // Board/History Phase
-  if (state.phase === 'board') {
-    return (
-      <Animated.View style={[styles.screenContainer, { opacity: fadeAnim }]}>
-        <BoardScreen onClose={() => dispatch({ type: 'RESET_SESSION' })} />
-      </Animated.View>
-    );
-  }
-
-  // Active or Summary phase
   return (
-    <Animated.View style={[styles.screenContainer, { opacity: fadeAnim }]}>
-      <TableView matchColor={matchColor} />
-    </Animated.View>
+    <Animated.View
+      style={[
+        styles.screenContainer,
+        {
+          opacity: fadeAnim,
+          transform: [{ translateY: slideAnim }]
+        }
+      ]}
+    >{renderScreen()}</Animated.View>
   );
 }
 

@@ -108,6 +108,7 @@ export const COLORS = {
     errorBg: 'rgba(239, 68, 68, 0.1)',
 
     warning: '#F59E0B',
+    warningDark: '#D97706',
     warningGlow: 'rgba(245, 158, 11, 0.4)',
 
     info: '#3B82F6',

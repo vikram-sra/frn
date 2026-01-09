@@ -4,7 +4,7 @@
  * Creates realistic conversation dynamics
  */
 
-import { COLORS } from '../constants/theme';
+import { COLORS } from '../../presentation/theme';
 
 // ═══════════════════════════════════════════════════════════════
 // 📝 TYPES

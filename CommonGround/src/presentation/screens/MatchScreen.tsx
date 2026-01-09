@@ -2,7 +2,7 @@ import React from 'react';
 import { View, StyleSheet } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import ColorRoll from '../components/ColorRoll/ColorRoll';
-import { COLORS } from '../constants/theme';
+import { COLORS } from '../theme';
 
 interface MatchScreenProps {
     onMatchComplete: (color: string) => void;

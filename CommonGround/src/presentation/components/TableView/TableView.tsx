@@ -14,10 +14,11 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import { useSession, generateId, TableEntry } from '../../context/SessionContext';
-import { analyzeSentiment, getSentimentColor, Sentiment } from '../../engines/SentimentEngine';
-import { redact } from '../../engines/RedactionEngine';
-import { botController } from '../../bots/BotController';
-import { saveSession, generateSessionId } from '../../utils/storage';
+import { analyzeSentiment, getSentimentColor, Sentiment } from '../../../data/services/SentimentEngine';
+import { redact } from '../../../data/services/RedactionEngine';
+import { botController } from '../../../data/services/BotService';
+import { saveSession, generateSessionId } from '../../../data/repositories/SessionRepository';
+import { synthesisService } from '../../../data/services/SynthesisService';
 import {
     COLORS,
     TYPOGRAPHY,
@@ -27,7 +28,7 @@ import {
     SHADOWS,
     GLASS_CARD,
     hexToRgba,
-} from '../../constants/theme';
+} from '../../theme';
 
 const { width, height } = Dimensions.get('window');
 
@@ -59,7 +60,47 @@ const BackgroundGlow = memo(() => {
 });
 
 // ═══════════════════════════════════════════════════════════════
-// 🎴 ANIMATED ENTRY CARD WITH IMPROVED DESIGN
+// 🌉 SYNTHESIS BRIDGE COMPONENT
+// ═══════════════════════════════════════════════════════════════
+const SynthesisBridge = memo(({ visible, insight }: { visible: boolean; insight: string }) => {
+    const fadeAnim = useRef(new Animated.Value(0)).current;
+
+    useEffect(() => {
+        Animated.timing(fadeAnim, {
+            toValue: visible ? 1 : 0,
+            duration: 800,
+            useNativeDriver: true,
+        }).start();
+    }, [visible]);
+
+    if (!visible) return null;
+
+    return (
+        <Animated.View style={[styles.synthesisContainer, { opacity: fadeAnim }]}>
+            <LinearGradient
+                colors={['rgba(168, 85, 247, 0.2)', 'rgba(6, 182, 212, 0.2)']}
+                start={{ x: 0, y: 0.5 }}
+                end={{ x: 1, y: 0.5 }}
+                style={styles.bridgeGlow}
+            />
+            <View style={styles.synthesisCard}>
+                <LinearGradient
+                    colors={[hexToRgba(COLORS.glassBg, 0.9), hexToRgba(COLORS.glassBg, 0.95)]}
+                    style={StyleSheet.absoluteFill}
+                />
+                <View style={styles.synthesisIconContainer}>
+                    <Text style={styles.synthesisIcon}>✨</Text>
+                </View>
+                <Text style={styles.synthesisTitle}>SYNTHESIS</Text>
+                <Text style={styles.synthesisText}>{insight}</Text>
+                <View style={styles.synthesisLine} />
+            </View>
+        </Animated.View>
+    );
+});
+
+// ═══════════════════════════════════════════════════════════════
+// 🎴 ANIMATED ENTRY CARD WITH GLASSMORPHISM
 // ═══════════════════════════════════════════════════════════════
 interface EntryCardProps {
     entry: TableEntry;
@@ -92,12 +133,17 @@ const EntryCard = memo(({ entry, isCommon, botName, index }: EntryCardProps) => 
                 {
                     opacity: fadeAnim,
                     transform: [{ translateY: slideAnim }, { scale: scaleAnim }],
+                    borderColor: isCommon ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)',
                 },
             ]}
         >
+            <View style={[styles.glassBackground, { backgroundColor: isCommon ? 'rgba(16, 185, 129, 0.05)' : 'rgba(239, 68, 68, 0.05)' }]} />
+
             {/* Accent gradient bar */}
             <LinearGradient
-                colors={isCommon ? [COLORS.success, COLORS.successDark] : [COLORS.error, COLORS.errorDark]}
+                colors={isCommon ? [COLORS.success, 'transparent'] : [COLORS.error, 'transparent']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 0, y: 1 }}
                 style={styles.entryAccent}
             />
 
@@ -163,6 +209,15 @@ export default function TableView({ matchColor }: TableViewProps) {
     const [lastUserInput, setLastUserInput] = useState<string>('');
     const [isTyping, setIsTyping] = useState(false);
     const [recentStatements, setRecentStatements] = useState<Set<string>>(new Set());
+    const [synthesisInsight, setSynthesisInsight] = useState<string | null>(null);
+
+    // Determines if synthesis should show
+    useEffect(() => {
+        if (state.commonalities.length >= 2 && state.differences.length >= 2) {
+            const insight = synthesisService.getInsight(state.category, state.commonalities.length, state.differences.length);
+            setSynthesisInsight(insight);
+        }
+    }, [state.commonalities.length, state.differences.length, state.category]);
 
     // Animation Values
     const leftDoorAnim = useRef(new Animated.Value(0)).current;
@@ -640,18 +695,11 @@ export default function TableView({ matchColor }: TableViewProps) {
                         </ScrollView>
                     </Animated.View>
 
-                    {/* Center Gutter - fades out when doors open */}
-                    {!state.areDoorsOpen && (
-                        <Animated.View
-                            style={[
-                                styles.centerGutter,
-                                {
-                                    shadowColor: sentimentColor,
-                                    shadowOpacity: gutterGlowAnim,
-                                    shadowRadius: 25,
-                                }
-                            ]}
-                        >
+                    {/* Center Bridge Area */}
+                    <View style={styles.centerGutter} pointerEvents="none">
+                        <SynthesisBridge visible={!!synthesisInsight && !state.areDoorsOpen} insight={synthesisInsight || ""} />
+
+                        {!synthesisInsight && !state.areDoorsOpen && (
                             <Animated.View
                                 style={[
                                     styles.gutterLine,
@@ -661,8 +709,8 @@ export default function TableView({ matchColor }: TableViewProps) {
                                     }
                                 ]}
                             />
-                        </Animated.View>
-                    )}
+                        )}
+                    </View>
 
                     {/* Red Column */}
                     <Animated.View style={[
@@ -774,6 +822,75 @@ const styles = StyleSheet.create({
         flex: 1,
         backgroundColor: COLORS.bgPrimary,
     },
+    // New Glassmorphic Styles
+    synthesisContainer: {
+        position: 'absolute',
+        top: '30%',
+        left: -80,
+        width: 180,
+        height: 240,
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 50,
+    },
+    bridgeGlow: {
+        position: 'absolute',
+        width: 400,
+        height: 60,
+        borderRadius: 30,
+        opacity: 0.6,
+    },
+    synthesisCard: {
+        width: 140,
+        padding: SPACING.md,
+        borderRadius: RADIUS.xl,
+        borderWidth: 1,
+        borderColor: 'rgba(255, 255, 255, 0.2)',
+        alignItems: 'center',
+        overflow: 'hidden',
+        zIndex: 60,
+        ...SHADOWS.lg,
+    },
+    synthesisIconContainer: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        backgroundColor: 'rgba(255, 255, 255, 0.1)',
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginBottom: SPACING.sm,
+        borderWidth: 1,
+        borderColor: 'rgba(255, 255, 255, 0.2)',
+    },
+    synthesisIcon: {
+        fontSize: 20,
+    },
+    synthesisTitle: {
+        fontSize: 10,
+        fontWeight: 'bold',
+        color: COLORS.accentCyan,
+        letterSpacing: 1.5,
+        marginBottom: 4,
+    },
+    synthesisText: {
+        fontSize: 11,
+        color: COLORS.textPrimary,
+        textAlign: 'center',
+        lineHeight: 16,
+        fontWeight: '600',
+    },
+    synthesisLine: {
+        width: 20,
+        height: 2,
+        backgroundColor: COLORS.accentPurple,
+        marginTop: SPACING.sm,
+        borderRadius: 1,
+    },
+    glassBackground: {
+        ...StyleSheet.absoluteFillObject,
+        opacity: 0.5,
+    },
+    // End New Styles
     glowOrb: {
         position: 'absolute',
         borderRadius: 999,

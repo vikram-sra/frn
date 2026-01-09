@@ -4,7 +4,7 @@
  * Uses weighted scoring for more accurate detection
  */
 
-import { COLORS } from '../constants/theme';
+import { COLORS } from '../../presentation/theme';
 
 // ═══════════════════════════════════════════════════════════════
 // 📚 WORD LIBRARIES

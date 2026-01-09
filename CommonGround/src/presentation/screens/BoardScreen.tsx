@@ -12,8 +12,8 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import { useSession } from '../context/SessionContext';
-import { getSessions, SavedSession } from '../utils/storage';
-import mockData from '../constants/mockGlobalBoard.json';
+import { getSessions, SavedSession } from '../../data/repositories/SessionRepository';
+import mockData from '../../data/mock/mockGlobalBoard.json';
 import {
     COLORS,
     TYPOGRAPHY,
@@ -23,7 +23,7 @@ import {
     getCategoryColor,
     SHADOWS,
     hexToRgba,
-} from '../constants/theme';
+} from '../theme';
 
 const { width, height } = Dimensions.get('window');
 
