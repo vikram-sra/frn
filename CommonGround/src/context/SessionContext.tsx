@@ -8,71 +8,67 @@ export interface TableEntry {
     timestamp: number;
 }
 
+export interface ChatMessage {
+    id: string;
+    text: string;
+    author: 'user' | 'bot';
+    timestamp: number;
+}
+
 export interface SessionState {
-    isMatched: boolean;
-    matchColor: string | null;
+    phase: 'category_select' | 'matching' | 'active' | 'summary';
     category: string;
     commonalities: TableEntry[];
     differences: TableEntry[];
-    chatMessages: Array<{
-        id: string;
-        text: string;
-        author: 'user' | 'bot';
-        timestamp: number;
-    }>;
-    sessionStartTime: number | null;
+    chatMessages: ChatMessage[];
     timerSeconds: number;
-    currentBotType: 'mirror' | 'devils_advocate' | 'silent_observer' | 'toxic';
+    areDoorsOpen: boolean; // New state
 }
 
 // Actions
-type SessionAction =
-    | { type: 'SET_MATCHED'; color: string }
-    | { type: 'RESET_SESSION' }
+type Action =
     | { type: 'SET_CATEGORY'; category: string }
+    | { type: 'START_MATCH' }
+    | { type: 'START_SESSION' }
+    | { type: 'UPDATE_TIMER'; seconds: number }
     | { type: 'ADD_COMMONALITY'; entry: TableEntry }
     | { type: 'ADD_DIFFERENCE'; entry: TableEntry }
-    | { type: 'ADD_CHAT_MESSAGE'; message: SessionState['chatMessages'][0] }
-    | { type: 'UPDATE_TIMER'; seconds: number }
-    | { type: 'SET_BOT_TYPE'; botType: SessionState['currentBotType'] };
+    | { type: 'ADD_CHAT_MESSAGE'; message: ChatMessage }
+    | { type: 'OPEN_DOORS' } // New action
+    | { type: 'RESET_SESSION' };
 
 // Initial State
 const initialState: SessionState = {
-    isMatched: false,
-    matchColor: null,
-    category: 'General',
+    phase: 'category_select', // Start here now
+    category: 'Modern Life',
+    timerSeconds: 300, // 5 minutes
     commonalities: [],
     differences: [],
     chatMessages: [],
-    sessionStartTime: null,
-    timerSeconds: 300, // 5 minutes default
-    currentBotType: 'mirror',
+    areDoorsOpen: false, // New state
 };
 
 // Reducer
-function sessionReducer(state: SessionState, action: SessionAction): SessionState {
+function sessionReducer(state: SessionState, action: Action): SessionState {
     switch (action.type) {
-        case 'SET_MATCHED':
-            return {
-                ...state,
-                isMatched: true,
-                matchColor: action.color,
-                sessionStartTime: Date.now(),
-            };
-        case 'RESET_SESSION':
-            return initialState;
         case 'SET_CATEGORY':
-            return { ...state, category: action.category };
+            return { ...state, category: action.category, phase: 'matching' };
+        case 'START_MATCH':
+            return { ...state, phase: 'matching' };
+        case 'START_SESSION':
+            return { ...initialState, category: state.category, phase: 'active' };
+        case 'UPDATE_TIMER':
+            return { ...state, timerSeconds: action.seconds };
         case 'ADD_COMMONALITY':
             return { ...state, commonalities: [...state.commonalities, action.entry] };
         case 'ADD_DIFFERENCE':
             return { ...state, differences: [...state.differences, action.entry] };
         case 'ADD_CHAT_MESSAGE':
             return { ...state, chatMessages: [...state.chatMessages, action.message] };
-        case 'UPDATE_TIMER':
-            return { ...state, timerSeconds: action.seconds };
-        case 'SET_BOT_TYPE':
-            return { ...state, currentBotType: action.botType };
+        case 'OPEN_DOORS':
+            return { ...state, areDoorsOpen: true };
+        case 'RESET_SESSION':
+            return initialState;
         default:
             return state;
     }
@@ -81,7 +77,7 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
 // Context
 interface SessionContextType {
     state: SessionState;
-    dispatch: React.Dispatch<SessionAction>;
+    dispatch: React.Dispatch<Action>;
 }
 
 const SessionContext = createContext<SessionContextType | undefined>(undefined);
@@ -108,5 +104,5 @@ export function useSession() {
 
 // Helper to generate unique IDs
 export function generateId(): string {
-    return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    return Date.now().toString() + '-' + Math.random().toString(36).substr(2, 9);
 }

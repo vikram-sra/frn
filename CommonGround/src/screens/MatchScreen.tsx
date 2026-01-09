@@ -1,31 +1,26 @@
-import React, { useState } from 'react';
-import { View, StyleSheet, StatusBar } from 'react-native';
+import React from 'react';
+import { View, StyleSheet, Dimensions } from 'react-native';
 import ColorRoll from '../components/ColorRoll/ColorRoll';
-import TableView from '../components/TableView/TableView';
-import { useSession } from '../context/SessionContext';
 
-type Screen = 'match' | 'table' | 'board';
+const { width, height } = Dimensions.get('window');
 
-export default function MatchScreen() {
-    const { dispatch } = useSession();
-    const [currentScreen, setCurrentScreen] = useState<Screen>('match');
-    const [matchColor, setMatchColor] = useState('#3B82F6');
+interface MatchScreenProps {
+    onMatchComplete: (color: string) => void;
+    initialCategory: string;
+}
+
+export default function MatchScreen({ onMatchComplete, initialCategory }: MatchScreenProps) {
 
     const handleMatch = (color: string) => {
-        setMatchColor(color);
-        dispatch({ type: 'SET_MATCHED', color });
-
-        // Transition to table view
+        // Navigate after short delay
         setTimeout(() => {
-            setCurrentScreen('table');
-        }, 500);
+            onMatchComplete(color);
+        }, 1000);
     };
 
     return (
         <View style={styles.container}>
-            <StatusBar barStyle="light-content" />
-            {currentScreen === 'match' && <ColorRoll onMatch={handleMatch} />}
-            {currentScreen === 'table' && <TableView matchColor={matchColor} />}
+            <ColorRoll onMatch={handleMatch} categoryName={initialCategory} />
         </View>
     );
 }
@@ -33,6 +28,6 @@ export default function MatchScreen() {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: '#000',
+        backgroundColor: '#0a0a0a',
     },
 });
