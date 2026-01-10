@@ -12,65 +12,16 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import { useSession } from '../context/SessionContext';
 import { identityService } from '../../data/services/IdentityService';
+import { ParticleBackground } from '../components/ParticleBackground';
 import { COLORS, TYPOGRAPHY, SPACING, RADIUS, SHADOWS } from '../theme';
 
 const { width, height } = Dimensions.get('window');
 
-// ═══════════════════════════════════════════════════════════════
-// 🌟 ANIMATED PARTICLE BACKGROUND
-// ═══════════════════════════════════════════════════════════════
-function ParticleBackground() {
-    const particles = useRef(
-        Array.from({ length: 30 }, () => ({
-            x: Math.random() * width,
-            y: Math.random() * height,
-            size: 1 + Math.random() * 2,
-            opacity: new Animated.Value(0.1 + Math.random() * 0.3),
-            duration: 3000 + Math.random() * 4000,
-        }))
-    ).current;
-
-    useEffect(() => {
-        particles.forEach((particle) => {
-            const animate = () => {
-                Animated.sequence([
-                    Animated.timing(particle.opacity, {
-                        toValue: 0.4 + Math.random() * 0.3,
-                        duration: particle.duration,
-                        useNativeDriver: true,
-                    }),
-                    Animated.timing(particle.opacity, {
-                        toValue: 0.1 + Math.random() * 0.2,
-                        duration: particle.duration,
-                        useNativeDriver: true,
-                    }),
-                ]).start(() => animate());
-            };
-            animate();
-        });
-    }, []);
-
-    return (
-        <View style={StyleSheet.absoluteFill} pointerEvents="none">
-            {particles.map((particle, i) => (
-                <Animated.View
-                    key={i}
-                    style={[
-                        styles.particle,
-                        {
-                            left: particle.x,
-                            top: particle.y,
-                            width: particle.size,
-                            height: particle.size,
-                            opacity: particle.opacity,
-                        },
-                    ]}
-                />
-            ))}
-        </View>
-    );
-}
-
+/**
+ * 👤 IDENTITY REVEAL SCREEN
+ * Generates and presents a pseudonym to the user.
+ * Ensures privacy and encourages free expression.
+ */
 export default function IdentityRevealScreen() {
     const { dispatch } = useSession();
     const [identity, setIdentity] = useState(identityService.generateIdentity());
@@ -85,15 +36,21 @@ export default function IdentityRevealScreen() {
         // Set identity in context
         dispatch({ type: 'SET_IDENTITY', identity });
 
-        // Entrance Sequence
-        Animated.sequence([
+        // 🎬 Entrance Sequence
+        const entrance = Animated.sequence([
             Animated.timing(fadeAnim, { toValue: 1, duration: 600, useNativeDriver: true }),
             Animated.parallel([
                 Animated.spring(pulseAnim, { toValue: 1, tension: 50, friction: 8, useNativeDriver: true }),
                 Animated.spring(emojiScale, { toValue: 1, tension: 80, friction: 10, useNativeDriver: true }),
                 Animated.timing(slideAnim, { toValue: 0, duration: 500, useNativeDriver: true }),
             ]),
-        ]).start();
+        ]);
+
+        entrance.start();
+
+        return () => {
+            entrance.stop();
+        };
     }, []);
 
     const handleContinue = () => {
@@ -120,29 +77,88 @@ export default function IdentityRevealScreen() {
     };
 
     return (
-        <View style={styles.container}><LinearGradient
-            colors={['#030712', '#1E1B4B', '#030712']}
-            style={StyleSheet.absoluteFill}
-        /><ParticleBackground /><View style={styles.stepIndicator}><View style={[styles.stepDot, styles.stepActive]} /><View style={styles.stepLine} /><View style={styles.stepDot} /></View><Animated.View style={[styles.content, { opacity: fadeAnim }]}><Animated.Text style={[styles.eyebrow, { transform: [{ translateY: slideAnim }] }]}>YOUR DIGITAL AVATAR</Animated.Text><Animated.View style={[styles.card, { transform: [{ scale: pulseAnim }] }]}><LinearGradient
-            colors={['rgba(168, 85, 247, 0.2)', 'rgba(6, 182, 212, 0.1)']}
-            style={styles.cardGradient}
-        /><Animated.Text style={[
-            styles.emoji,
-            { transform: [{ scale: emojiScale }] }
-        ]}>{identity.avatarEmoji}</Animated.Text><Animated.View style={{ transform: [{ translateY: slideAnim }] }}><Text style={styles.name}>{identity.name}</Text><Text style={styles.trait}>{identity.trait.toUpperCase()}</Text></Animated.View></Animated.View><Animated.Text style={[styles.description, { opacity: fadeAnim }]}>This pseudonym protects your identity, allowing you to speak freely without judgment.</Animated.Text><View style={styles.buttonContainer}><TouchableOpacity
-            style={styles.continueButton}
-            onPress={handleContinue}
-            activeOpacity={0.8}
-        ><LinearGradient
-            colors={['#A855F7', '#7C3AED']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.continueGradient}
-        ><Text style={styles.continueText}>NEXT: CHOOSE TOPIC</Text></LinearGradient></TouchableOpacity><TouchableOpacity
-            style={styles.shuffleButton}
-            onPress={handleShuffle}
-            activeOpacity={0.7}
-        ><Text style={styles.shuffleText}>SHUFFLE PERSONA</Text></TouchableOpacity></View></Animated.View></View>
+        <View style={styles.container}>
+            <LinearGradient
+                colors={['#030712', '#1E1B4B', '#030712']}
+                style={StyleSheet.absoluteFill}
+            />
+
+            <ParticleBackground />
+
+            {/* Step Progress */}
+            <View style={styles.stepIndicator}>
+                <View style={[styles.stepDot, styles.stepActive]} />
+                <View style={styles.stepLine} />
+                <View style={styles.stepDot} />
+                <View style={styles.stepLine} />
+                <View style={styles.stepDot} />
+            </View>
+
+            <Animated.View style={[styles.content, { opacity: fadeAnim }]}>
+                <Animated.Text
+                    style={[styles.eyebrow, { transform: [{ translateY: slideAnim }] }]}
+                    accessibilityRole="header"
+                >
+                    YOUR DIGITAL AVATAR
+                </Animated.Text>
+
+                {/* Identity Card */}
+                <Animated.View style={[styles.card, { transform: [{ scale: pulseAnim }] }]}>
+                    <LinearGradient
+                        colors={['rgba(168, 85, 247, 0.2)', 'rgba(6, 182, 212, 0.1)']}
+                        style={styles.cardGradient}
+                    />
+
+                    <Animated.Text
+                        style={[styles.emoji, { transform: [{ scale: emojiScale }] }]}
+                        accessibilityLabel={`Emoji: ${identity.avatarEmoji}`}
+                    >
+                        {identity.avatarEmoji}
+                    </Animated.Text>
+
+                    <Animated.View style={{ transform: [{ translateY: slideAnim }] }}>
+                        <Text style={styles.name}>{identity.name}</Text>
+                        <Text style={styles.trait}>{identity.trait.toUpperCase()}</Text>
+                    </Animated.View>
+                </Animated.View>
+
+                <Animated.Text style={[styles.description, { opacity: fadeAnim }]}>
+                    This pseudonym protects your identity, allowing you to speak freely without judgment.
+                </Animated.Text>
+
+                {/* Action Buttons */}
+                <View style={styles.buttonContainer}>
+                    <TouchableOpacity
+                        style={styles.continueButton}
+                        onPress={handleContinue}
+                        activeOpacity={0.8}
+                        accessibilityRole="button"
+                        accessibilityLabel="Next: Choose Topic"
+                        accessibilityHint="Transitions to trend selection screen"
+                    >
+                        <LinearGradient
+                            colors={['#A855F7', '#7C3AED']}
+                            start={{ x: 0, y: 0 }}
+                            end={{ x: 1, y: 1 }}
+                            style={styles.continueGradient}
+                        >
+                            <Text style={styles.continueText}>NEXT: CHOOSE TOPIC</Text>
+                        </LinearGradient>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                        style={styles.shuffleButton}
+                        onPress={handleShuffle}
+                        activeOpacity={0.7}
+                        accessibilityRole="button"
+                        accessibilityLabel="Shuffle Persona"
+                        accessibilityHint="Generates a new random pseudonym"
+                    >
+                        <Text style={styles.shuffleText}>SHUFFLE PERSONA</Text>
+                    </TouchableOpacity>
+                </View>
+            </Animated.View>
+        </View>
     );
 }
 
@@ -257,10 +273,5 @@ const styles = StyleSheet.create({
         fontSize: 11,
         fontWeight: TYPOGRAPHY.weightBold,
         opacity: 0.8,
-    },
-    particle: {
-        position: 'absolute',
-        backgroundColor: COLORS.accentPurple,
-        borderRadius: 10,
     },
 });

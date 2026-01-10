@@ -1,8 +1,10 @@
 /**
- * 🌐 LIVE TRENDS SERVICE
- * Fetches real-time trending topics from Google Trends RSS
- * Transforms raw trends into debate-worthy questions
+ * 🌐 LIVE TRENDS SERVICE (RSS-BASED) - ENHANCED
+ * Unified service to fetch trending topics via Google Trends RSS.
+ * Support for Daily vs Real-time feeds.
  */
+
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // ═══════════════════════════════════════════════════════════════
 // 📝 TYPES
@@ -11,33 +13,50 @@ export interface TrendingTopic {
     id: string;
     title: string;
     debateQuestion: string;
-    traffic: string;
+    traffic: string; // "High" or "100K+" etc
     description?: string;
     newsUrl?: string;
     imageUrl?: string;
     category: string;
+    source: 'daily' | 'realtime';
     timestamp: number;
 }
 
-export interface TrendsState {
-    topics: TrendingTopic[];
-    isLoading: boolean;
-    error: string | null;
-    lastUpdated: number | null;
+export type TrendRegion = 'US' | 'GB' | 'CA' | 'AU' | 'IN' | 'JP' | 'FR' | 'BR' | 'DE' | 'IT';
+export type TrendCategory = 'all' | 'b' | 'e' | 't' | 'm' | 'h';
+export type FeedType = 'daily' | 'realtime';
+export type LanguageCode = 'en-US' | 'es-ES';
+
+export const TREND_CATEGORIES: { label: string, value: TrendCategory }[] = [
+    { label: 'All Categories', value: 'all' },
+    { label: 'Business', value: 'b' },
+    { label: 'Entertainment', value: 'e' },
+    { label: 'Sci/Tech', value: 't' },
+    { label: 'Sports', value: 'm' },
+    { label: 'Health', value: 'h' },
+];
+
+export interface TrendsConfig {
+    region: TrendRegion;
+    category: TrendCategory;
+    feedType: FeedType;
+    hl: LanguageCode;
 }
 
 // ═══════════════════════════════════════════════════════════════
-// 🎯 DEBATE QUESTION TRANSFORMERS
+// 🎯 DEBATE QUESTION TRANSFORMERS (Dynamic & Engaging)
 // ═══════════════════════════════════════════════════════════════
 const DEBATE_TEMPLATES = [
-    (topic: string) => `Should ${topic} be more regulated?`,
-    (topic: string) => `Is ${topic} ultimately good for society?`,
-    (topic: string) => `Has ${topic} gone too far?`,
-    (topic: string) => `Do the benefits of ${topic} outweigh the risks?`,
-    (topic: string) => `Should we be concerned about ${topic}?`,
-    (topic: string) => `Is the hype around ${topic} justified?`,
-    (topic: string) => `Will ${topic} change the world for better or worse?`,
-    (topic: string) => `Is ${topic} overrated or underrated?`,
+    (topic: string) => `Does the impact of ${topic} improve human Connection?`,
+    (topic: string) => `Is the cultural obsession with ${topic} sustainable?`,
+    (topic: string) => `Should public policy prioritize ${topic} over economy?`,
+    (topic: string) => `Is ${topic} the defining problem of our generation?`,
+    (topic: string) => `Has the media exaggerated the importance of ${topic}?`,
+    (topic: string) => `Will ${topic} lead to more polarized communities?`,
+    (topic: string) => `Is the rapid evolution of ${topic} outpacing our ethics?`,
+    (topic: string) => `Do we rely too heavily on ${topic} for social validation?`,
+    (topic: string) => `Should access to ${topic} be considered a human right?`,
+    (topic: string) => `Is ${topic} bridge the gap between opposing worldviews?`,
 ];
 
 function transformToDebateQuestion(trend: string): string {
@@ -46,228 +65,158 @@ function transformToDebateQuestion(trend: string): string {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// 🏷️ CATEGORY CLASSIFIER
+// 🌐 NETWORK UTILS
 // ═══════════════════════════════════════════════════════════════
-const CATEGORY_KEYWORDS: Record<string, string[]> = {
-    "Artificial Intelligence": ["ai", "gpt", "openai", "chatgpt", "machine learning", "robot", "automation", "llm", "deepfake"],
-    "Social Media": ["tiktok", "instagram", "twitter", "x.com", "facebook", "meta", "influencer", "viral", "youtube"],
-    "Work Culture": ["remote work", "layoff", "hiring", "ceo", "strike", "union", "salary", "job", "career", "quiet quitting"],
-    "Climate Action": ["climate", "environment", "carbon", "solar", "wind", "ev", "electric vehicle", "sustainability", "pollution"],
-    "Digital Privacy": ["privacy", "data", "hack", "breach", "surveillance", "encryption", "tiktok ban", "spy"],
-    "Education Reform": ["college", "university", "school", "student", "teacher", "tuition", "degree", "education"],
-    "Future of Cities": ["housing", "rent", "city", "urban", "transit", "traffic", "zoning", "homeless"],
-    "Modern Life": [], // Default category
-};
-
-function classifyCategory(text: string): string {
-    const lowerText = text.toLowerCase();
-    for (const [category, keywords] of Object.entries(CATEGORY_KEYWORDS)) {
-        if (keywords.some(kw => lowerText.includes(kw))) {
-            return category;
-        }
-    }
-    return "Modern Life";
-}
-
-// ═══════════════════════════════════════════════════════════════
-// 🌐 RSS FETCHING (via CORS proxy for web)
-// ═══════════════════════════════════════════════════════════════
-
-// Multiple CORS proxies as fallback
 const CORS_PROXIES = [
     'https://api.allorigins.win/raw?url=',
-    'https://corsproxy.io/?',
     'https://api.codetabs.com/v1/proxy?quest=',
+    'https://cors-anywhere.herokuapp.com/',
 ];
 
-const GOOGLE_TRENDS_RSS = 'https://trends.google.com/trends/trendingsearches/daily/rss?geo=US';
-
-async function fetchWithProxy(url: string): Promise<string> {
-    for (const proxy of CORS_PROXIES) {
-        try {
-            const response = await fetch(proxy + encodeURIComponent(url), {
-                headers: { 'Accept': 'application/rss+xml, application/xml, text/xml' }
-            });
-            if (response.ok) {
-                return await response.text();
-            }
-        } catch (e) {
-            console.warn(`Proxy ${proxy} failed, trying next...`);
-        }
-    }
-    throw new Error('All CORS proxies failed');
-}
-
-function parseRSSXML(xmlText: string): TrendingTopic[] {
-    const topics: TrendingTopic[] = [];
-
-    // Simple XML parsing for RSS items
-    const itemMatches = xmlText.match(/<item>([\s\S]*?)<\/item>/g) || [];
-
-    itemMatches.slice(0, 15).forEach((item, index) => {
-        const getTag = (tag: string): string => {
-            const match = item.match(new RegExp(`<${tag}>([\\s\\S]*?)<\\/${tag}>`));
-            // Handle CDATA
-            if (match) {
-                return match[1].replace(/<!\[CDATA\[(.*?)\]\]>/g, '$1').trim();
-            }
-            return '';
-        };
-
-        const title = getTag('title') || getTag('ht:news_item_title');
-        const traffic = getTag('ht:approx_traffic') || '10K+';
-        const description = getTag('ht:news_item_snippet') || getTag('description');
-        const newsUrl = getTag('ht:news_item_url') || getTag('link');
-        const picture = item.match(/<ht:picture>([^<]+)<\/ht:picture>/)?.[1] || '';
-
-        if (title) {
-            topics.push({
-                id: `trend-${index}-${Date.now()}`,
-                title: title,
-                debateQuestion: transformToDebateQuestion(title),
-                traffic: traffic,
-                description: description,
-                newsUrl: newsUrl,
-                imageUrl: picture,
-                category: classifyCategory(title + ' ' + description),
-                timestamp: Date.now(),
-            });
-        }
-    });
-
-    return topics;
-}
-
-// ═══════════════════════════════════════════════════════════════
-// 📦 FALLBACK TOPICS (when RSS fails)
-// ═══════════════════════════════════════════════════════════════
-const FALLBACK_TOPICS: TrendingTopic[] = [
-    {
-        id: 'fallback-1',
-        title: 'AI in the Workplace',
-        debateQuestion: 'Should AI be allowed to replace human jobs?',
-        traffic: '500K+',
-        category: 'Artificial Intelligence',
-        timestamp: Date.now(),
-    },
-    {
-        id: 'fallback-2',
-        title: 'Social Media Algorithms',
-        debateQuestion: 'Are social media algorithms destroying democracy?',
-        traffic: '200K+',
-        category: 'Social Media',
-        timestamp: Date.now(),
-    },
-    {
-        id: 'fallback-3',
-        title: 'Remote Work Debate',
-        debateQuestion: 'Is remote work better than going to the office?',
-        traffic: '300K+',
-        category: 'Work Culture',
-        timestamp: Date.now(),
-    },
-    {
-        id: 'fallback-4',
-        title: 'Climate Emergency',
-        debateQuestion: 'Should we ban fossil fuels immediately?',
-        traffic: '400K+',
-        category: 'Climate Action',
-        timestamp: Date.now(),
-    },
-    {
-        id: 'fallback-5',
-        title: 'Data Privacy Laws',
-        debateQuestion: 'Should all data collection require explicit opt-in?',
-        traffic: '150K+',
-        category: 'Digital Privacy',
-        timestamp: Date.now(),
-    },
-    {
-        id: 'fallback-6',
-        title: 'College Tuition Crisis',
-        debateQuestion: 'Should college education be free for everyone?',
-        traffic: '250K+',
-        category: 'Education Reform',
-        timestamp: Date.now(),
-    },
-    {
-        id: 'fallback-7',
-        title: 'Housing Affordability',
-        debateQuestion: 'Should cities ban single-family zoning?',
-        traffic: '180K+',
-        category: 'Future of Cities',
-        timestamp: Date.now(),
-    },
-    {
-        id: 'fallback-8',
-        title: 'Screen Time for Kids',
-        debateQuestion: 'Should smartphones be banned for teenagers?',
-        traffic: '350K+',
-        category: 'Modern Life',
-        timestamp: Date.now(),
-    },
-];
-
-// ═══════════════════════════════════════════════════════════════
-// 🔌 MAIN SERVICE API
-// ═══════════════════════════════════════════════════════════════
+const CACHE_KEY = '@cg_trends_rss_cache_v2';
 
 class TrendsService {
     private cache: TrendingTopic[] = [];
     private lastFetch: number = 0;
-    private readonly CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
 
-    async fetchTrendingTopics(): Promise<TrendingTopic[]> {
-        // Return cached if fresh
-        if (this.cache.length > 0 && Date.now() - this.lastFetch < this.CACHE_DURATION) {
-            return this.cache;
-        }
+    /**
+     * Constructs the RSS URL based on EXACT mapping provided
+     */
+    getTargetUrl(config: TrendsConfig): string {
+        const { region, category, feedType, hl } = config;
+        const basePath = feedType === 'realtime' ? 'realtime' : 'daily';
+        const catKey = feedType === 'realtime' ? 'category' : 'cat';
+
+        return `https://trends.google.com/trends/trendingsearches/${basePath}/rss?geo=${region}&${catKey}=${category}&hl=${hl}`;
+    }
+
+    async fetchTrendingTopics(config: TrendsConfig): Promise<TrendingTopic[]> {
+        const url = this.getTargetUrl(config);
+        return this.fetchByUrl(url);
+    }
+
+    async fetchByUrl(url: string, categoryLabel = 'Trending'): Promise<TrendingTopic[]> {
+        console.log(`📡 URL: ${url}`);
 
         try {
-            console.log('🌐 Fetching live Google Trends...');
-            const xmlText = await fetchWithProxy(GOOGLE_TRENDS_RSS);
-            const topics = parseRSSXML(xmlText);
+            const xmlText = await this.fetchWithRetry(url);
+            const topics = this.parseGenericRSS(xmlText, categoryLabel);
 
             if (topics.length > 0) {
                 this.cache = topics;
                 this.lastFetch = Date.now();
-                console.log(`✅ Loaded ${topics.length} live trends`);
                 return topics;
             }
         } catch (error) {
-            console.warn('⚠️ Failed to fetch live trends, using fallback:', error);
+            console.error('❌ Fetch failed:', error);
         }
-
-        // Return fallback topics
-        console.log('📦 Using fallback topics');
-        return FALLBACK_TOPICS;
+        return this.getFallbackTopics();
     }
 
-    getTopicsByCategory(category: string): TrendingTopic[] {
-        if (category === 'All' || !category) {
-            return this.cache.length > 0 ? this.cache : FALLBACK_TOPICS;
+    private async fetchWithRetry(url: string, retries = 2): Promise<string> {
+        const encodedUrl = encodeURIComponent(url);
+        // Direct attempt
+        try {
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 3500);
+            const res = await fetch(url, { signal: controller.signal });
+            clearTimeout(timeout);
+            if (res.ok) return await res.text();
+        } catch (e) {
+            console.log('⏩ Direct fetch blocked (CORS). Rotating proxies...');
         }
-        const filtered = (this.cache.length > 0 ? this.cache : FALLBACK_TOPICS)
-            .filter(t => t.category === category);
-        return filtered.length > 0 ? filtered : FALLBACK_TOPICS;
+
+        // Proxy rotation
+        for (const proxy of CORS_PROXIES) {
+            try {
+                const controller = new AbortController();
+                const timeout = setTimeout(() => controller.abort(), 6000);
+                const res = await fetch(proxy + encodedUrl, { signal: controller.signal });
+                clearTimeout(timeout);
+                if (res.ok) return await res.text();
+            } catch (e) { }
+        }
+        throw new Error('RSS Sync Error');
     }
 
-    getAllCategories(): string[] {
+    private parseGenericRSS(xmlText: string, categoryLabel: string): TrendingTopic[] {
+        const topics: TrendingTopic[] = [];
+        const itemMatches = xmlText.match(/<item>([\s\S]*?)<\/item>/g) || [];
+
+        itemMatches.forEach((item, index) => {
+            const getTag = (tag: string): string => {
+                const match = item.match(new RegExp(`<${tag}>([\\s\\S]*?)<\\/${tag}>`));
+                return match ? match[1].replace(/<!\[CDATA\[(.*?)\]\]>/g, '$1').trim() : '';
+            };
+
+            const title = getTag('title');
+            const traffic = getTag('ht:approx_traffic') || 'Trending';
+
+            if (title) {
+                topics.push({
+                    id: `rss-${index}-${Date.now()}`,
+                    title,
+                    debateQuestion: transformToDebateQuestion(title),
+                    traffic: traffic,
+                    category: categoryLabel,
+                    source: xmlText.includes('realtime') ? 'realtime' : 'daily',
+                    timestamp: Date.now(),
+                    description: getTag('description'),
+                });
+            }
+        });
+
+        return topics;
+    }
+
+    private parseRSSXML(xmlText: string, config: TrendsConfig): TrendingTopic[] {
+        const categoryLabel = TREND_CATEGORIES.find(c => c.value === config.category)?.label || 'Trending';
+        return this.parseGenericRSS(xmlText, categoryLabel);
+    }
+
+    getRegions(): { label: string, value: TrendRegion }[] {
         return [
-            'All',
-            'Modern Life',
-            'Artificial Intelligence',
-            'Social Media',
-            'Work Culture',
-            'Climate Action',
-            'Digital Privacy',
-            'Education Reform',
-            'Future of Cities',
+            { label: 'United States', value: 'US' },
+            { label: 'United Kingdom', value: 'GB' },
+            { label: 'Canada', value: 'CA' },
+            { label: 'Australia', value: 'AU' },
+            { label: 'India', value: 'IN' },
+            { label: 'Japan', value: 'JP' },
+            { label: 'France', value: 'FR' },
+            { label: 'Brazil', value: 'BR' },
+            { label: 'Germany', value: 'DE' },
+            { label: 'Italy', value: 'IT' },
         ];
     }
 
     getFallbackTopics(): TrendingTopic[] {
-        return FALLBACK_TOPICS;
+        const fallbacks: any[] = [
+            { title: 'Global Markets', traffic: '2M+', cat: 'Business' },
+            { title: 'AI Ethics', traffic: '1M+', cat: 'Tech' },
+            { title: 'Space Exploration', traffic: '500K+', cat: 'Sci/Tech' },
+            { title: 'Climate Summit', traffic: '800K+', cat: 'Top Stories' },
+            { title: 'Championship Finals', traffic: '1.2M+', cat: 'Sports' },
+            { title: 'Mental Health Awareness', traffic: '250K+', cat: 'Health' },
+            { title: 'Crypto Regulation', traffic: '700K+', cat: 'Finance' },
+            { title: 'Quantum Computing', traffic: '150K+', cat: 'Technology' },
+            { title: 'Sustainable Energy', traffic: '400K+', cat: 'Environment' },
+            { title: 'Remote Work Trends', traffic: '900K+', cat: 'Lifestyle' },
+            { title: 'Olympic Preparations', traffic: '2M+', cat: 'Sports' },
+            { title: 'Genetic Engineering', traffic: '300K+', cat: 'Science' },
+            { title: 'Global Supply Chain', traffic: '1.5M+', cat: 'Business' },
+            { title: 'Digital Privacy', traffic: '600K+', cat: 'Tech' },
+            { title: 'Renaissance in Art', traffic: '100K+', cat: 'Entertainment' },
+        ];
+
+        return fallbacks.map((f, i) => ({
+            id: `f-${i}`,
+            title: f.title,
+            debateQuestion: transformToDebateQuestion(f.title),
+            traffic: f.traffic,
+            category: f.cat,
+            source: 'daily',
+            timestamp: Date.now()
+        }));
     }
 }
 

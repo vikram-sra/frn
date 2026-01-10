@@ -36,6 +36,8 @@ interface TableViewProps {
     matchColor: string;
 }
 
+const MAX_INPUT_LENGTH = 500;
+
 // ═══════════════════════════════════════════════════════════════
 // 🌟 ANIMATED BACKGROUND PARTICLES
 // ═══════════════════════════════════════════════════════════════
@@ -119,11 +121,14 @@ const EntryCard = memo(({ entry, isCommon, botName, index }: EntryCardProps) => 
 
     useEffect(() => {
         const delay = index * 50;
-        Animated.parallel([
+        const animation = Animated.parallel([
             Animated.spring(fadeAnim, { toValue: 1, tension: 80, friction: 10, delay, useNativeDriver: true }),
             Animated.spring(slideAnim, { toValue: 0, tension: 80, friction: 10, delay, useNativeDriver: true }),
             Animated.spring(scaleAnim, { toValue: 1, tension: 80, friction: 10, delay, useNativeDriver: true }),
-        ]).start();
+        ]);
+
+        animation.start();
+        return () => animation.stop();
     }, []);
 
     return (
@@ -136,6 +141,8 @@ const EntryCard = memo(({ entry, isCommon, botName, index }: EntryCardProps) => 
                     borderColor: isCommon ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)',
                 },
             ]}
+            accessibilityRole="text"
+            accessibilityLabel={`${entry.author === 'user' ? 'You' : botName} said: ${displayText}`}
         >
             <View style={[styles.glassBackground, { backgroundColor: isCommon ? 'rgba(16, 185, 129, 0.05)' : 'rgba(239, 68, 68, 0.05)' }]} />
 
@@ -446,32 +453,46 @@ export default function TableView({ matchColor }: TableViewProps) {
     };
 
     const getFinalStand = () => {
-        const userCommon = state.commonalities.filter(e => e.author === 'user').length;
-        const userDiff = state.differences.filter(e => e.author === 'user').length;
+        const total = state.commonalities.length + state.differences.length;
+        const totalCommon = state.commonalities.length;
+        const totalDiff = state.differences.length;
 
-        if (userCommon > userDiff) return {
-            text: "IN AGREEMENT",
+        if (total === 0) return {
+            text: "QUIET START",
+            stand: 'neutral',
+            color: COLORS.textMuted,
+            gradient: ['#64748B', '#475569'] as [string, string],
+            sub: "No ground was broken yet.",
+            emoji: "☁️"
+        };
+
+        const ratio = totalCommon / total;
+
+        if (ratio > 0.6) return {
+            text: "HARMONY REACHED",
             stand: 'agreement',
             color: COLORS.success,
             gradient: ['#10B981', '#059669'] as [string, string],
-            sub: "You found common ground.",
+            sub: "Significant common ground identified.",
             emoji: "🤝"
         };
-        if (userDiff > userCommon) return {
-            text: "IN OPPOSITION",
-            stand: 'opposition',
-            color: COLORS.error,
-            gradient: ['#EF4444', '#DC2626'] as [string, string],
-            sub: "You stood your ground.",
-            emoji: "⚔️"
-        };
-        return {
-            text: "NEUTRAL",
+
+        if (ratio > 0.4 && ratio < 0.6) return {
+            text: "NUANCED DIALOGUE",
             stand: 'neutral',
             color: COLORS.info,
             gradient: ['#3B82F6', '#2563EB'] as [string, string],
-            sub: "You see both sides.",
+            sub: "A balanced exchange of perspectives.",
             emoji: "⚖️"
+        };
+
+        return {
+            text: "PRODUCTIVE FRICTION",
+            stand: 'opposition',
+            color: COLORS.error,
+            gradient: ['#F43F5E', '#BE123C'] as [string, string],
+            sub: "More differences discovered than commonalities.",
+            emoji: "⚔️"
         };
     };
 
@@ -544,7 +565,22 @@ export default function TableView({ matchColor }: TableViewProps) {
                                 </Text>
                                 <Text style={styles.statLabel}>COMMON</Text>
                             </View>
-                            <View style={styles.statDivider} />
+
+                            <View style={styles.ratioWrapper}>
+                                <View style={styles.ratioBarBackground}>
+                                    <View
+                                        style={[
+                                            styles.ratioBarFill,
+                                            {
+                                                width: `${(state.commonalities.length / (state.commonalities.length + state.differences.length || 1)) * 100}%`,
+                                                backgroundColor: COLORS.success
+                                            }
+                                        ]}
+                                    />
+                                </View>
+                                <Text style={styles.ratioText}>BALANCE</Text>
+                            </View>
+
                             <View style={styles.statBox}>
                                 <Text style={[styles.statNumber, { color: COLORS.error }]}>
                                     {state.differences.length}
@@ -563,17 +599,17 @@ export default function TableView({ matchColor }: TableViewProps) {
                                     onPress={() => handleChallengeResponse(true)}
                                 >
                                     <LinearGradient
-                                        colors={[COLORS.success, COLORS.successDark]}
+                                        colors={[COLORS.accentPurple, COLORS.cosmicPurple]}
                                         style={styles.chalBtnGradient}
                                     >
-                                        <Text style={styles.chalBtnText}>YES, SHOW ME MORE</Text>
+                                        <Text style={styles.chalBtnText}>VIEW GLOBAL LEDGER</Text>
                                     </LinearGradient>
                                 </TouchableOpacity>
                                 <TouchableOpacity
                                     style={styles.chalBtnNo}
                                     onPress={() => handleChallengeResponse(false)}
                                 >
-                                    <Text style={styles.chalBtnTextNo}>NO, START OVER</Text>
+                                    <Text style={styles.chalBtnTextNo}>NEW CONVERSATION</Text>
                                 </TouchableOpacity>
                             </View>
                         </View>
@@ -792,6 +828,9 @@ export default function TableView({ matchColor }: TableViewProps) {
                                 placeholderTextColor={COLORS.textMuted}
                                 onSubmitEditing={handleSend}
                                 returnKeyType="send"
+                                maxLength={MAX_INPUT_LENGTH}
+                                accessibilityLabel="Message input field"
+                                accessibilityHint={`Max ${MAX_INPUT_LENGTH} characters`}
                             />
                         </Animated.View>
                         <Animated.View style={{ transform: [{ scale: sendButtonScale }] }}>
@@ -1277,6 +1316,28 @@ const styles = StyleSheet.create({
         color: COLORS.textMuted,
         letterSpacing: TYPOGRAPHY.trackingWidest,
         marginTop: SPACING.xs,
+    },
+    ratioWrapper: {
+        flex: 1,
+        alignItems: 'center',
+        paddingHorizontal: SPACING.md,
+    },
+    ratioBarBackground: {
+        width: '100%',
+        height: 6,
+        backgroundColor: 'rgba(255,255,255,0.1)',
+        borderRadius: 3,
+        overflow: 'hidden',
+        marginBottom: SPACING.xs,
+    },
+    ratioBarFill: {
+        height: '100%',
+    },
+    ratioText: {
+        fontSize: 8,
+        color: 'rgba(255,255,255,0.3)',
+        fontWeight: '900',
+        letterSpacing: 1,
     },
     statDivider: {
         width: 1,

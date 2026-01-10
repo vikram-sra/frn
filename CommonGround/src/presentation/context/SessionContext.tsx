@@ -24,7 +24,7 @@ export interface UserIdentity {
     trait: string;
 }
 
-export type AppPhase = 'identity_reveal' | 'category_select' | 'matching' | 'active' | 'summary' | 'board';
+export type AppPhase = 'identity_reveal' | 'opponent_select' | 'category_select' | 'matching' | 'active' | 'summary' | 'board';
 
 export interface SessionState {
     phase: AppPhase;
@@ -37,6 +37,7 @@ export interface SessionState {
     areDoorsOpen: boolean;
     botName: string;
     matchColor: string;
+    opponentMode: string;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -45,6 +46,7 @@ export interface SessionState {
 type Action =
     | { type: 'SET_IDENTITY'; identity: UserIdentity }
     | { type: 'CONFIRM_IDENTITY' }
+    | { type: 'SELECT_OPPONENT'; opponent: string }
     | { type: 'SET_CATEGORY'; category: string }
     | { type: 'START_MATCH' }
     | { type: 'START_SESSION'; botName?: string; matchColor?: string }
@@ -70,6 +72,7 @@ const initialState: SessionState = {
     areDoorsOpen: false,
     botName: 'Bot',
     matchColor: '#A855F7',
+    opponentMode: 'Human Match',
 };
 
 // ═══════════════════════════════════════════════════════════════
@@ -89,10 +92,18 @@ function sessionReducer(state: SessionState, action: Action): SessionState {
                 phase: 'category_select'
             };
 
+        case 'SELECT_OPPONENT':
+            return {
+                ...state,
+                opponentMode: action.opponent,
+                phase: 'matching'
+            };
+
         case 'SET_CATEGORY':
             return {
                 ...state,
-                category: action.category
+                category: action.category,
+                phase: 'opponent_select'
             };
 
         case 'START_MATCH':

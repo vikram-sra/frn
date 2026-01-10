@@ -45,18 +45,23 @@ const CosmicRing = memo(({ isSearching, matchColor }: { isSearching: boolean; ma
     ).current;
 
     useEffect(() => {
+        const animations: Animated.CompositeAnimation[] = [];
+        const timers: NodeJS.Timeout[] = [];
+
         if (isSearching) {
-            Animated.loop(
+            const rotateLoop = Animated.loop(
                 Animated.timing(rotateAnim, {
                     toValue: 1,
                     duration: 6000,
                     useNativeDriver: true,
                 })
-            ).start();
+            );
+            rotateLoop.start();
+            animations.push(rotateLoop);
 
             particles.forEach((p, i) => {
                 const animate = () => {
-                    Animated.parallel([
+                    const anim = Animated.parallel([
                         Animated.sequence([
                             Animated.timing(p.opacity, { toValue: 0.9, duration: 600 + Math.random() * 400, useNativeDriver: true }),
                             Animated.timing(p.opacity, { toValue: 0.3, duration: 600 + Math.random() * 400, useNativeDriver: true }),
@@ -65,18 +70,28 @@ const CosmicRing = memo(({ isSearching, matchColor }: { isSearching: boolean; ma
                             Animated.timing(p.scale, { toValue: 1.5, duration: 600, useNativeDriver: true }),
                             Animated.timing(p.scale, { toValue: 1, duration: 600, useNativeDriver: true }),
                         ]),
-                    ]).start(() => isSearching && animate());
+                    ]);
+                    anim.start(() => isSearching && animate());
+                    animations.push(anim);
                 };
-                setTimeout(() => animate(), i * 50);
+                const t = setTimeout(() => animate(), i * 50);
+                timers.push(t);
             });
         } else if (matchColor) {
-            Animated.loop(
+            const pulseLoop = Animated.loop(
                 Animated.sequence([
                     Animated.timing(scaleAnim, { toValue: 1.15, duration: 400, useNativeDriver: true }),
                     Animated.timing(scaleAnim, { toValue: 1, duration: 400, useNativeDriver: true }),
                 ])
-            ).start();
+            );
+            pulseLoop.start();
+            animations.push(pulseLoop);
         }
+
+        return () => {
+            animations.forEach(a => a.stop());
+            timers.forEach(t => clearTimeout(t));
+        };
     }, [isSearching, matchColor]);
 
     const rotation = rotateAnim.interpolate({
@@ -126,9 +141,10 @@ const FloatingParticles = memo(() => {
     ).current;
 
     useEffect(() => {
+        const animations: Animated.CompositeAnimation[] = [];
         particles.forEach((particle, i) => {
             const animateParticle = () => {
-                Animated.parallel([
+                const anim = Animated.parallel([
                     Animated.sequence([
                         Animated.timing(particle.opacity, { toValue: 0.5, duration: particle.duration, useNativeDriver: true }),
                         Animated.timing(particle.opacity, { toValue: 0.1, duration: particle.duration, useNativeDriver: true }),
@@ -137,10 +153,13 @@ const FloatingParticles = memo(() => {
                         Animated.timing(particle.translateY, { toValue: -30, duration: particle.duration * 2, useNativeDriver: true }),
                         Animated.timing(particle.translateY, { toValue: 0, duration: particle.duration * 2, useNativeDriver: true }),
                     ]),
-                ]).start(() => animateParticle());
+                ]);
+                anim.start(() => animateParticle());
+                animations.push(anim);
             };
             setTimeout(() => animateParticle(), i * 80);
         });
+        return () => animations.forEach(a => a.stop());
     }, []);
 
     return (

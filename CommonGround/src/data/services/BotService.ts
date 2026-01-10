@@ -20,6 +20,8 @@ export interface Bot {
     }>;
 }
 
+export type BotId = 'mirror' | 'advocate' | 'observer' | 'toxic' | 'balanced';
+
 // ═══════════════════════════════════════════════════════════════
 // 📚 TOPIC STATEMENTS BY CATEGORY
 // ═══════════════════════════════════════════════════════════════
@@ -381,7 +383,7 @@ export class BotController {
         return bots[Math.floor(Math.random() * bots.length)];
     }
 
-    setBot(botType: 'mirror' | 'advocate' | 'observer' | 'toxic' | 'balanced') {
+    setBot(botType: BotId) {
         switch (botType) {
             case 'mirror':
                 this.currentBot = new MirrorBot();
